@@ -1,0 +1,34 @@
+# Backend
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg[binary]
+alembic
+
+# Configuration and authentication
+pydantic
+pydantic-settings
+email-validator
+python-dotenv
+PyJWT
+pwdlib[argon2]
+python-multipart
+
+# Agent and RAG
+openai
+langchain
+langchain-openai
+langchain-chroma
+langchain-text-splitters
+langgraph
+chromadb
+pypdf
+nbformat
+
+# Frontend
+streamlit
+requests
+
+# Testing
+pytest
+httpx

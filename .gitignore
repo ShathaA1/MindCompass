@@ -1,0 +1,39 @@
+# Environment variables and secrets
+.env
+*.env.local
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE and operating system
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local databases
+chroma_data/
+postgres_data/
+*.sqlite3
+
+# Raw knowledge-base files
+knowledge_base/pdf/*
+knowledge_base/notebooks/*
+
+# Keep empty knowledge-base directories
+!knowledge_base/pdf/.gitkeep
+!knowledge_base/notebooks/.gitkeep
+
+# Logs and temporary files
+*.log
+tmp/
+temp/

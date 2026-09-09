@@ -1,0 +1,1 @@
+"""MindCompass backend package."""
