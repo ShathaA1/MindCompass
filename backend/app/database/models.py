@@ -38,6 +38,13 @@ class User(Base):
 
     role = Column(String(50), nullable=False)
 
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('learner', 'instructor')",
+            name="chk_user_role"
+        ),
+    )
+
     learner_profile = relationship(
         "LearnerProfile",
         back_populates="user",
