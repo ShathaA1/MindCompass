@@ -173,3 +173,136 @@ def plan_next_topic(
     return {
         "current_topic": next_topic
     }
+
+
+
+def recommend_next_action(
+    state: TutorState
+) -> dict:
+    """
+    Recommend the next learning action based on
+    the learner's mastery of the current topic.
+    """
+
+    # Get the mastery information already loaded
+    # into TutorState.
+    topic_mastery = state.get(
+        "topic_mastery",
+        {}
+    )
+
+    # If the learner has no mastery record yet,
+    # start with an explanation.
+    if not topic_mastery:
+        recommended_action = "explain"
+
+    else:
+        # Read the learner's mastery score.
+        mastery_score = topic_mastery.get(
+            "mastery_score",
+            0
+        )
+
+        # Low mastery means the learner needs
+        # a clear explanation of the topic.
+        if mastery_score < 40:
+            recommended_action = "explain"
+
+        # Medium-low mastery means the learner
+        # should reinforce understanding through practice.
+        elif mastery_score < 70:
+            recommended_action = "practice"
+
+        # Higher mastery means the learner
+        # should review and consolidate the topic.
+        elif mastery_score < 85:
+            recommended_action = "review"
+
+        # Strong mastery means the learner
+        # is ready for an assessment.
+        else:
+            recommended_action = "assess"
+
+    # Store the recommendation in TutorState
+    # for use by the next workflow node.
+    return {
+        "recommended_action": recommended_action
+    }
+
+
+
+def resolve_action(
+    state: TutorState
+) -> dict:
+    """
+    Resolve the final agent action by combining
+    the learner's explicit request with the recommendation.
+    """
+
+    # Read the learner's requested action.
+    learner_need = state.get(
+        "learner_need",
+        "recommend"
+    )
+
+    # Read the action recommended from mastery data.
+    recommended_action = state.get(
+        "recommended_action",
+        "explain"
+    )
+
+    # If the learner explicitly asked for an action,
+    # respect the learner's request.
+    if learner_need in [
+        "explain",
+        "assess",
+        "practice",
+        "review",
+    ]:
+        final_action = learner_need
+
+    # If the learner asked for a recommendation,
+    # use the action selected from mastery data.
+    else:
+        final_action = recommended_action
+
+    # Store the final decision in TutorState.
+    return {
+        "recommended_action": final_action
+    }
+
+
+def route_recommended_action(
+    state: TutorState
+) -> str:
+    """
+    Route the workflow based on the final
+    recommended action stored in TutorState.
+    """
+
+    # Read the final action selected after
+    # learner intent and mastery are resolved.
+    recommended_action = state.get(
+        "recommended_action",
+        "explain"
+    )
+
+    # Route explanation actions to teaching.
+    if recommended_action == "explain":
+        return "teach"
+
+    # Route assessment actions.
+    if recommended_action == "assess":
+        return "assess"
+
+    # Route practice actions.
+    if recommended_action == "practice":
+        return "practice"
+
+    # Route review actions.
+    if recommended_action == "review":
+        return "review"
+
+    # Use teaching as a safe default
+    # for unknown actions.
+    return "teach"

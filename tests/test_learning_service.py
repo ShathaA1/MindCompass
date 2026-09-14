@@ -3,6 +3,7 @@ from app.services.learning_service import (
     get_active_learning_path,
     select_next_topic,
     are_prerequisites_completed,
+    get_topic_mastery,
 )
 
 def test_get_active_learning_path():
@@ -119,4 +120,70 @@ def test_prerequisites_completed_for_agentic_ai():
 
     finally:
         # Always close the database session after the test
+        db.close()
+
+
+def test_get_topic_mastery():
+    """
+    Test that the learner's mastery information
+    is loaded correctly for the current topic.
+    """
+
+    # Create a real database session
+    db = SessionLocal()
+
+    try:
+        # Get mastery information for user 2
+        # on topic 3: Introduction to Agentic AI.
+        result = get_topic_mastery(
+            db=db,
+            user_id=2,
+            topic_id=3
+        )
+
+        # Make sure a mastery record was found
+        assert result != {}
+
+        # Verify that the returned mastery record
+        # belongs to the correct learner and topic
+        assert result["user_id"] == 2
+        assert result["topic_id"] == 3
+
+        # Verify the test mastery score
+        assert result["mastery_score"] == 30
+
+        # Verify the stored weak areas
+        assert result["weak_areas"] == [
+            "agent planning",
+            "tool use"
+        ]
+
+    finally:
+        # Always close the database session
+        db.close()
+
+
+def test_get_topic_mastery_not_found():
+    """
+    Test that an empty dictionary is returned
+    when no mastery record exists.
+    """
+
+    # Create a real database session
+    db = SessionLocal()
+
+    try:
+        # Use a user/topic combination that does not
+        # have a TopicMastery record in the test data.
+        result = get_topic_mastery(
+            db=db,
+            user_id=2,
+            topic_id=999999
+        )
+
+        # No mastery record should be returned
+        assert result == {}
+
+    finally:
+        # Always close the database session
         db.close()

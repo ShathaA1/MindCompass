@@ -5,6 +5,7 @@ from app.database.models import (
     LearningPathItem,
     Topic,
     TopicPrerequisite,
+    TopicMastery,
 )
 
 
@@ -159,3 +160,42 @@ def select_next_topic(
     # Return an empty dictionary if there is
     # no available topic to study next
     return {}
+
+
+
+def get_topic_mastery(
+    db: Session,
+    user_id: int,
+    topic_id: int
+) -> dict:
+    """
+    Get the learner's mastery information
+    for a specific topic.
+    """
+
+    # Search for the learner's mastery record
+    # for the requested topic.
+    mastery = (
+        db.query(TopicMastery)
+        .filter(
+            TopicMastery.user_id == user_id,
+            TopicMastery.topic_id == topic_id
+        )
+        .first()
+    )
+
+    # Return an empty dictionary if the learner
+    # has not been assessed on this topic yet.
+    if not mastery:
+        return {}
+
+    # Convert the database record into a dictionary
+    # that can be stored inside TutorState.
+    return {
+        "topic_mastery_id": mastery.topic_mastery_id,
+        "user_id": mastery.user_id,
+        "topic_id": mastery.topic_id,
+        "mastery_score": mastery.mastery_score,
+        "weak_areas": mastery.weak_areas,
+        "last_assessed_at": mastery.last_assessed_at,
+    }

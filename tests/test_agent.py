@@ -2,11 +2,16 @@ from app.database.connection import SessionLocal
 from app.agent.graph import (
     load_learner_context,
     load_active_learning_path,
+    load_topic_mastery,
+    build_tutor_graph,
 )
 from app.agent.planning import (
     determine_learner_need,
     route_action,
     plan_next_topic,
+    recommend_next_action,
+    resolve_action,
+    route_recommended_action,
 )
 
 def test_load_learner_context():
@@ -344,3 +349,442 @@ def test_plan_next_topic():
     finally:
         # Always close the database session after the test
         db.close()
+
+
+
+def test_load_topic_mastery():
+    """
+    Test that the learner's topic mastery
+    is loaded into TutorState correctly.
+    """
+
+    # Create a real database session
+    db = SessionLocal()
+
+    try:
+        # Simulate TutorState after the current topic
+        # has already been selected.
+        state = {
+            "user_id": 2,
+            "current_topic": {
+                "topic_id": 3,
+                "name": "Introduction to Agentic AI",
+            },
+        }
+
+        # Load the mastery information
+        result = load_topic_mastery(
+            state=state,
+            db=db,
+        )
+
+        # Make sure topic_mastery was added
+        assert "topic_mastery" in result
+
+        # Verify the mastery belongs to the correct topic
+        assert result["topic_mastery"]["topic_id"] == 3
+
+        # Verify the stored test mastery score
+        assert result["topic_mastery"]["mastery_score"] == 30
+
+        # Verify the stored weak areas
+        assert result["topic_mastery"]["weak_areas"] == [
+            "agent planning",
+            "tool use",
+        ]
+
+    finally:
+        # Always close the database session
+        db.close()
+
+
+
+def test_load_topic_mastery_without_current_topic():
+    """
+    Test that an empty mastery dictionary is returned
+    when no current topic exists in TutorState.
+    """
+
+    # Create a real database session
+    db = SessionLocal()
+
+    try:
+        # Simulate a state before a topic is selected
+        state = {
+            "user_id": 2,
+        }
+
+        # Try to load mastery information
+        result = load_topic_mastery(
+            state=state,
+            db=db,
+        )
+
+        # No topic means no mastery information
+        assert result == {
+            "topic_mastery": {}
+        }
+
+    finally:
+        # Always close the database session
+        db.close()
+
+
+
+def test_recommend_next_action_no_mastery():
+    """
+    Test that the agent recommends explanation
+    when no mastery record exists.
+    """
+
+    # Simulate a learner with no mastery data yet
+    state = {
+        "topic_mastery": {}
+    }
+
+    # Get the recommended learning action
+    result = recommend_next_action(state)
+
+    # A new learner should start with explanation
+    assert result["recommended_action"] == "explain"
+
+
+def test_recommend_next_action_low_mastery():
+    """
+    Test that low mastery leads to explanation.
+    """
+
+    # Simulate low mastery
+    state = {
+        "topic_mastery": {
+            "mastery_score": 30
+        }
+    }
+
+    # Get the recommended learning action
+    result = recommend_next_action(state)
+
+    # Low mastery should require explanation
+    assert result["recommended_action"] == "explain"
+
+
+def test_recommend_next_action_medium_mastery():
+    """
+    Test that medium mastery leads to practice.
+    """
+
+    # Simulate medium mastery
+    state = {
+        "topic_mastery": {
+            "mastery_score": 55
+        }
+    }
+
+    # Get the recommended learning action
+    result = recommend_next_action(state)
+
+    # Medium mastery should require practice
+    assert result["recommended_action"] == "practice"
+
+
+def test_recommend_next_action_high_mastery():
+    """
+    Test that higher mastery leads to review.
+    """
+
+    # Simulate higher mastery
+    state = {
+        "topic_mastery": {
+            "mastery_score": 75
+        }
+    }
+
+    # Get the recommended learning action
+    result = recommend_next_action(state)
+
+    # Higher mastery should lead to review
+    assert result["recommended_action"] == "review"
+
+
+def test_recommend_next_action_strong_mastery():
+    """
+    Test that strong mastery leads to assessment.
+    """
+
+    # Simulate strong mastery
+    state = {
+        "topic_mastery": {
+            "mastery_score": 90
+        }
+    }
+
+    # Get the recommended learning action
+    result = recommend_next_action(state)
+
+    # Strong mastery should lead to assessment
+    assert result["recommended_action"] == "assess"
+
+
+
+def test_resolve_action_explicit_explain():
+    """
+    Test that an explicit learner request
+    overrides the mastery-based recommendation.
+    """
+
+    # Simulate a learner who explicitly asks for explanation,
+    # while the mastery logic recommends practice.
+    state = {
+        "learner_need": "explain",
+        "recommended_action": "practice",
+    }
+
+    # Resolve the final agent action
+    result = resolve_action(state)
+
+    # The learner's explicit request should be respected
+    assert result["recommended_action"] == "explain"
+
+
+def test_resolve_action_explicit_assess():
+    """
+    Test that an explicit assessment request
+    is used as the final action.
+    """
+
+    # Simulate a learner who explicitly asks for assessment
+    state = {
+        "learner_need": "assess",
+        "recommended_action": "explain",
+    }
+
+    # Resolve the final agent action
+    result = resolve_action(state)
+
+    # The explicit learner request should be used
+    assert result["recommended_action"] == "assess"
+
+
+def test_resolve_action_explicit_practice():
+    """
+    Test that an explicit practice request
+    is used as the final action.
+    """
+
+    # Simulate a learner who explicitly asks for practice
+    state = {
+        "learner_need": "practice",
+        "recommended_action": "review",
+    }
+
+    # Resolve the final agent action
+    result = resolve_action(state)
+
+    # The explicit learner request should be used
+    assert result["recommended_action"] == "practice"
+
+
+def test_resolve_action_explicit_review():
+    """
+    Test that an explicit review request
+    is used as the final action.
+    """
+
+    # Simulate a learner who explicitly asks for review
+    state = {
+        "learner_need": "review",
+        "recommended_action": "assess",
+    }
+
+    # Resolve the final agent action
+    result = resolve_action(state)
+
+    # The explicit learner request should be used
+    assert result["recommended_action"] == "review"
+
+
+def test_resolve_action_recommendation():
+    """
+    Test that the mastery-based recommendation
+    is used when the learner asks what to do next.
+    """
+
+    # Simulate a learner asking for a recommendation
+    state = {
+        "learner_need": "recommend",
+        "recommended_action": "practice",
+    }
+
+    # Resolve the final agent action
+    result = resolve_action(state)
+
+    # The mastery-based recommendation should be used
+    assert result["recommended_action"] == "practice"
+
+
+def test_resolve_action_default():
+    """
+    Test that the default recommendation is used
+    when no learner need is available.
+    """
+
+    # Simulate a state with only a mastery-based recommendation
+    state = {
+        "recommended_action": "explain",
+    }
+
+    # Resolve the final agent action
+    result = resolve_action(state)
+
+    # The existing recommendation should be preserved
+    assert result["recommended_action"] == "explain"
+
+
+
+def test_tutor_graph_end_to_end():
+    """
+    Test the Tutor Agent workflow from START to END
+    using real learner and learning path data.
+    """
+
+    # Build the compiled LangGraph workflow.
+    graph = build_tutor_graph()
+
+    # Create the initial TutorState.
+    # The graph should load the remaining information
+    # and make the learning recommendation automatically.
+    initial_state = {
+        "user_id": 2,
+        "user_message": "What should I learn next?"
+    }
+
+    # Run the complete Tutor Agent workflow.
+    result = graph.invoke(initial_state)
+
+    # Verify that the learner context
+    # was loaded successfully.
+    assert result["learner_context"]["user_id"] == 2
+    assert result["learner_context"]["goal"] == "Learn Agentic AI"
+
+    # Verify that the active learning path
+    # was loaded successfully.
+    assert result["learning_path"]["learning_path_id"] == 1
+    assert result["learning_path"]["status"] == "active"
+
+    # Verify that the learner request
+    # was classified as a recommendation request.
+    assert result["learner_need"] == "recommend"
+
+    # Python and Machine Learning are completed,
+    # so Agentic AI should be selected next.
+    assert result["current_topic"]["topic_id"] == 3
+    assert result["current_topic"]["name"] == "Introduction to Agentic AI"
+
+    # Verify that mastery information
+    # was loaded for the selected topic.
+    assert result["topic_mastery"]["topic_id"] == 3
+    assert result["topic_mastery"]["mastery_score"] == 30
+
+    # A mastery score of 30 should result
+    # in an explanation recommendation.
+    assert result["recommended_action"] == "explain"
+
+
+
+def test_route_recommended_action_to_teach():
+    """
+    Test routing an explanation recommendation
+    to the teaching node.
+    """
+
+    state = {
+        "recommended_action": "explain"
+    }
+
+    result = route_recommended_action(state)
+
+    assert result == "teach"
+
+
+def test_route_recommended_action_to_assess():
+    """
+    Test routing an assessment recommendation
+    to the assessment node.
+    """
+
+    state = {
+        "recommended_action": "assess"
+    }
+
+    result = route_recommended_action(state)
+
+    assert result == "assess"
+
+
+def test_route_recommended_action_to_practice():
+    """
+    Test routing a practice recommendation
+    to the practice node.
+    """
+
+    state = {
+        "recommended_action": "practice"
+    }
+
+    result = route_recommended_action(state)
+
+    assert result == "practice"
+
+
+def test_route_recommended_action_to_review():
+    """
+    Test routing a review recommendation
+    to the review node.
+    """
+
+    state = {
+        "recommended_action": "review"
+    }
+
+    result = route_recommended_action(state)
+
+    assert result == "review"
+
+
+def test_tutor_graph_routes_to_teach():
+    """
+    Test that the complete Tutor Agent workflow
+    routes the learner to the teaching node.
+    """
+
+    # Build the compiled Tutor Agent workflow.
+    graph = build_tutor_graph()
+
+    # Create the initial TutorState.
+    initial_state = {
+        "user_id": 2,
+        "user_message": "What should I learn next?"
+    }
+
+    # Run the complete workflow.
+    result = graph.invoke(initial_state)
+
+    # Verify that the learner asked
+    # for a recommendation.
+    assert result["learner_need"] == "recommend"
+
+    # Verify that Agentic AI
+    # was selected as the current topic.
+    assert result["current_topic"]["topic_id"] == 3
+    assert result["current_topic"]["name"] == "Introduction to Agentic AI"
+
+    # Verify the learner's current mastery.
+    assert result["topic_mastery"]["mastery_score"] == 30
+
+    # A mastery score of 30 should
+    # produce an explanation recommendation.
+    assert result["recommended_action"] == "explain"
+
+    # The explanation recommendation should
+    # route the workflow to the teaching node.
+    assert result["response"] == "Teaching action selected."
