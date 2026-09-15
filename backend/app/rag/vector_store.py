@@ -33,7 +33,7 @@ def _get_client() -> chromadb.ClientAPI:
 
     global _client
     if _client is None:
-        _client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
+        _client = chromadb.PersistentClient(path=settings.chroma_persist_directory)
     return _client
 
 
