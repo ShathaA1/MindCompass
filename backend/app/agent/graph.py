@@ -6,6 +6,9 @@ from app.services.learner_service import get_learner_context
 from app.services.learning_service import (
     get_active_learning_path,
     get_topic_mastery,
+    select_next_topic,
+    update_learning_path,
+    complete_learning_path,
 )
 from langgraph.graph import StateGraph, START, END
 
@@ -255,6 +258,21 @@ def build_tutor_graph():
         review_node
     )
 
+    # Add the recommendation action node
+    # to the Tutor Agent workflow.
+    workflow.add_node(
+        "recommend",
+        recommend_node
+    )
+
+    # Add the learning path update node.
+    # This node is used when the learner
+    # has completed the current topic.
+    workflow.add_node(
+        "update_learning_path",
+        update_learning_path_node
+    )
+
     # Define the main workflow sequence.
     workflow.add_edge(
         START,
@@ -303,9 +321,16 @@ def build_tutor_graph():
             "assess": "assess",
             "practice": "practice",
             "review": "review",
+            "recommend": "update_learning_path",
         }
     )
 
+    # After marking the current topic as completed,
+    # continue to the recommendation workflow.
+    workflow.add_edge(
+        "update_learning_path",
+        "recommend"
+    )
     # End the workflow after the selected action node runs.
     workflow.add_edge(
         "teach",
@@ -324,6 +349,11 @@ def build_tutor_graph():
 
     workflow.add_edge(
         "review",
+        END
+    )
+
+    workflow.add_edge(
+        "recommend",
         END
     )
 
@@ -378,4 +408,155 @@ def review_node(state: TutorState) -> dict:
     # real review logic is integrated.
     return {
         "response": "Review action selected."
+    }
+
+
+def recommend_node(
+    state: TutorState
+) -> dict:
+    """
+    Recommend the learner's next topic
+    after completing the current topic.
+    """
+
+    # Get the active learning path
+    # from the shared agent state.
+    learning_path = state.get(
+        "learning_path",
+        {}
+    )
+
+    # Read the active learning path ID.
+    learning_path_id = learning_path.get(
+        "learning_path_id"
+    )
+
+    # Stop safely if there is no active
+    # learning path available.
+    if not learning_path_id:
+        return {
+            "response": (
+                "No active learning path was found."
+            )
+        }
+
+    # Open a database session to find
+    # the learner's next available topic.
+    with SessionLocal() as db:
+
+        # Select the next incomplete topic
+        # whose prerequisites are completed.
+        next_topic = select_next_topic(
+            db=db,
+            learning_path_id=learning_path_id
+        )
+
+        # If no topic remains, mark the entire
+        # learning path as completed.
+        if not next_topic:
+            completed_path = complete_learning_path(
+                db=db,
+                learning_path_id=learning_path_id
+            )
+
+            # Update the learning path information
+            # stored in the shared agent state.
+            updated_learning_path = {
+                **learning_path,
+                "status": completed_path.get(
+                    "status",
+                    "completed"
+                ),
+            }
+
+            return {
+                "learning_path": updated_learning_path,
+                "response": (
+                    "You have completed all topics "
+                    "in your learning path."
+                ),
+            }
+
+    # Store the newly selected topic in TutorState
+    # and provide a recommendation response.
+    return {
+        "current_topic": next_topic,
+        "next_topic_id": next_topic["topic_id"],
+        "response": (
+            f"Your next recommended topic is "
+            f"{next_topic['name']}."
+        ),
+    }
+
+def update_learning_path_node(
+    state: TutorState
+) -> dict:
+    """
+    Update the current learning path item
+    using the learner's latest mastery result.
+    """
+
+    # Get the learner ID from the shared agent state.
+    user_id = state.get("user_id")
+
+    # Get the active learning path
+    # loaded earlier in the workflow.
+    learning_path = state.get(
+        "learning_path",
+        {}
+    )
+
+    # Get the current topic selected
+    # by the planning workflow.
+    current_topic = state.get(
+        "current_topic",
+        {}
+    )
+
+    # Stop safely if the required information
+    # is not available in the agent state.
+    if (
+        not user_id
+        or not learning_path
+        or not current_topic
+    ):
+        return {}
+
+    # Read the required database identifiers.
+    learning_path_id = learning_path.get(
+        "learning_path_id"
+    )
+    topic_id = current_topic.get(
+        "topic_id"
+    )
+
+    # Stop safely if either identifier is missing.
+    if not learning_path_id or not topic_id:
+        return {}
+
+    # Open a database session for this graph node.
+    with SessionLocal() as db:
+
+        # Update the current learning path item
+        # using the learner's latest mastery score.
+        updated_item = update_learning_path(
+            db=db,
+            user_id=user_id,
+            learning_path_id=learning_path_id,
+            topic_id=topic_id
+        )
+
+    # Store the updated item information
+    # so later nodes can use it if needed.
+    return {
+        "current_topic": {
+            **current_topic,
+            "status": updated_item.get(
+                "status",
+                current_topic.get("status")
+            ),
+            "recommended_action": updated_item.get(
+                "recommended_action"
+            ),
+        }
     }

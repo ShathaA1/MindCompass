@@ -308,14 +308,22 @@ def create_learning_path(
             topic_id=topic_id
         )
 
-        # Completed topics do not need another
-        # learning recommendation.
-        if initial_status == "completed":
-            recommended_action = "assess"
-        else:
-            # Topics that still need to be learned
-            # should start with an explanation.
-            recommended_action = "explain"
+        # Determine the learner's initial topic status
+        # based on the latest assessment result.
+        initial_status = get_initial_topic_status(
+            db=db,
+            user_id=user_id,
+            topic_id=topic_id
+        )
+
+        # Determine the appropriate learning action
+        # using the same recommendation logic used
+        # throughout the system.
+        recommended_action = get_topic_recommended_action(
+            db=db,
+            user_id=user_id,
+            topic_id=topic_id
+        )
 
         # Create the personalized learning path item.
         learning_path_item = LearningPathItem(
@@ -383,3 +391,174 @@ def get_initial_topic_status(
     # Topics below the mastery threshold
     # still need to be studied.
     return "pending"
+
+
+def update_learning_path(
+    db: Session,
+    user_id: int,
+    learning_path_id: int,
+    topic_id: int
+) -> dict:
+    """
+    Update a learning path item based on
+    the learner's latest topic mastery.
+    """
+
+    # Find the requested topic inside
+    # the learner's learning path.
+    learning_path_item = (
+        db.query(LearningPathItem)
+        .join(LearningPath)
+        .filter(
+            LearningPathItem.learning_path_id
+            == learning_path_id,
+            LearningPathItem.topic_id
+            == topic_id,
+            LearningPath.user_id
+            == user_id
+        )
+        .first()
+    )
+
+    # Return an empty dictionary if the topic
+    # does not exist in this learner's path.
+    if not learning_path_item:
+        return {}
+
+    # Recalculate the topic status using
+    # the learner's latest mastery data.
+    updated_status = get_initial_topic_status(
+        db=db,
+        user_id=user_id,
+        topic_id=topic_id
+    )
+
+    # Update the learning path item status.
+    learning_path_item.status = updated_status
+
+    # Determine the learner's next action
+    # using the latest assessment mastery score.
+    updated_action = get_topic_recommended_action(
+        db=db,
+        user_id=user_id,
+        topic_id=topic_id
+    )
+
+    # Update the learning path item with
+    # the latest status and recommended action.
+    learning_path_item.status = updated_status
+    learning_path_item.recommended_action = updated_action
+
+    # Save the updated learning path item.
+    db.commit()
+    db.refresh(learning_path_item)
+
+    # Return the updated information so it
+    # can later be stored inside TutorState.
+    return {
+        "learning_path_item_id":
+            learning_path_item.learning_path_item_id,
+        "learning_path_id":
+            learning_path_item.learning_path_id,
+        "topic_id":
+            learning_path_item.topic_id,
+        "status":
+            learning_path_item.status,
+        "recommended_action":
+            learning_path_item.recommended_action,
+    }
+
+
+def complete_learning_path(
+    db: Session,
+    learning_path_id: int
+) -> dict:
+    """
+    Mark a learning path as completed
+    after all of its topics are completed.
+    """
+
+    # Find the requested learning path
+    # in the database.
+    learning_path = (
+        db.query(LearningPath)
+        .filter(
+            LearningPath.learning_path_id
+            == learning_path_id
+        )
+        .first()
+    )
+
+    # Return an empty dictionary if
+    # the learning path does not exist.
+    if not learning_path:
+        return {}
+
+    # Mark the learning path as completed.
+    learning_path.status = "completed"
+
+    # Save the updated learning path.
+    db.commit()
+
+    # Refresh the object with the latest
+    # values stored in the database.
+    db.refresh(learning_path)
+
+    # Return the updated learning path information.
+    return {
+        "learning_path_id": (
+            learning_path.learning_path_id
+        ),
+        "user_id": learning_path.user_id,
+        "name": learning_path.name,
+        "goal": learning_path.goal,
+        "status": learning_path.status,
+    }
+
+
+def get_topic_recommended_action(
+    db: Session,
+    user_id: int,
+    topic_id: int
+) -> str:
+    """
+    Determine the recommended learning action
+    based on the learner's latest assessment score.
+    """
+
+    # Get the learner's latest mastery information
+    # for the requested topic.
+    topic_mastery = get_topic_mastery(
+        db=db,
+        user_id=user_id,
+        topic_id=topic_id
+    )
+
+    # If the learner has not completed an assessment
+    # yet, start by explaining the topic.
+    if not topic_mastery:
+        return "explain"
+
+    # Mastery score represents the result
+    # of the learner's latest assessment.
+    mastery_score = topic_mastery.get(
+        "mastery_score",
+        0
+    )
+
+    # Very low mastery requires explanation.
+    if mastery_score < 40:
+        return "explain"
+
+    # Moderate mastery requires more practice.
+    if mastery_score < 70:
+        return "practice"
+
+    # Good mastery requires targeted review
+    # of the learner's remaining weak areas.
+    if mastery_score < 85:
+        return "review"
+
+    # High mastery means the topic is completed,
+    # so the agent should determine the next step.
+    return "recommend"

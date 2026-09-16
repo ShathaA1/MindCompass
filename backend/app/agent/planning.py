@@ -180,53 +180,57 @@ def recommend_next_action(
     state: TutorState
 ) -> dict:
     """
-    Recommend the next learning action based on
-    the learner's mastery of the current topic.
+    Recommend the learner's next action
+    based on the latest assessment mastery score.
     """
 
-    # Get the mastery information already loaded
-    # into TutorState.
+    # Get the learner's mastery information
+    # for the current topic.
     topic_mastery = state.get(
         "topic_mastery",
         {}
     )
 
-    # If the learner has no mastery record yet,
-    # start with an explanation.
+    # If the learner has not completed an assessment
+    # for this topic yet, start with an explanation.
     if not topic_mastery:
-        recommended_action = "explain"
+        return {
+            "recommended_action": "explain"
+        }
 
-    else:
-        # Read the learner's mastery score.
-        mastery_score = topic_mastery.get(
-            "mastery_score",
-            0
-        )
+    # Mastery score represents the learner's
+    # latest assessment result for this topic.
+    mastery_score = topic_mastery.get(
+        "mastery_score",
+        0
+    )
 
-        # Low mastery means the learner needs
-        # a clear explanation of the topic.
-        if mastery_score < 40:
-            recommended_action = "explain"
+    # Very low mastery indicates that the learner
+    # needs the concept explained again.
+    if mastery_score < 40:
+        return {
+            "recommended_action": "explain"
+        }
 
-        # Medium-low mastery means the learner
-        # should reinforce understanding through practice.
-        elif mastery_score < 70:
-            recommended_action = "practice"
+    # Moderate mastery indicates that the learner
+    # understands the basics but needs more practice.
+    if mastery_score < 70:
+        return {
+            "recommended_action": "practice"
+        }
 
-        # Higher mastery means the learner
-        # should review and consolidate the topic.
-        elif mastery_score < 85:
-            recommended_action = "review"
+    # Good mastery indicates that the learner
+    # should review remaining weak areas.
+    if mastery_score < 85:
+        return {
+            "recommended_action": "review"
+        }
 
-        # Strong mastery means the learner
-        # is ready for an assessment.
-        else:
-            recommended_action = "assess"
-
-    # Store the recommendation in TutorState
-    # for use by the next workflow node.
+    # A mastery score of 85 or higher means
+    # the topic is completed, so the agent should
+    # determine the learner's next step.
     return {
-        "recommended_action": recommended_action
+        "recommended_action": "recommend"
     }
 
 
@@ -302,6 +306,9 @@ def route_recommended_action(
     # Route review actions.
     if recommended_action == "review":
         return "review"
+
+    if recommended_action == "recommend":
+        return "recommend"
 
     # Use teaching as a safe default
     # for unknown actions.

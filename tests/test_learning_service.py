@@ -9,6 +9,9 @@ from app.services.learning_service import (
     get_required_topic_ids,
     create_learning_path,
     get_initial_topic_status,
+    update_learning_path,
+    get_topic_recommended_action,
+    complete_learning_path,
 )
 
 from app.database.models import (
@@ -624,8 +627,8 @@ def test_create_personalized_learning_path():
             assert items[2].status == "pending"
 
             # Verify the initial recommended actions.
-            assert items[0].recommended_action == "assess"
-            assert items[1].recommended_action == "assess"
+            assert items[0].recommended_action == "recommend"
+            assert items[1].recommended_action == "recommend"
             assert items[2].recommended_action == "explain"
 
         finally:
@@ -682,3 +685,690 @@ def test_create_personalized_learning_path():
 
             # Save all cleanup operations.
             db.commit()
+
+
+def test_update_learning_path_after_high_mastery():
+    """
+    Test updating a learning path item
+    after the learner achieves high mastery.
+    """
+
+    # Open a database session for the test.
+    with SessionLocal() as db:
+
+        # Generate a unique email for every test run
+        # to avoid conflicts with existing test data.
+        unique_email = (
+            f"update.path.{uuid.uuid4().hex}"
+            "@mindcompass.local"
+        )
+
+        # Create a temporary learner
+        # for this test only.
+        test_user = User(
+            name="Update Path Test User",
+            email=unique_email,
+            password_hash="test_hash",
+            role="learner"
+        )
+
+        db.add(test_user)
+        db.commit()
+        db.refresh(test_user)
+
+        # Store the user ID separately
+        # for safe cleanup.
+        test_user_id = test_user.user_id
+
+        try:
+            # Create a learning path for Python Basics.
+            # The learner has no mastery yet, so the
+            # topic should initially be pending.
+            path_result = create_learning_path(
+                db=db,
+                user_id=test_user_id,
+                target_topic_id=1,
+                path_name="Python Test Path",
+                goal="Learn Python"
+            )
+
+            learning_path_id = (
+                path_result["learning_path_id"]
+            )
+
+            # Load the Python learning path item
+            # before adding mastery data.
+            item_before = (
+                db.query(LearningPathItem)
+                .filter(
+                    LearningPathItem.learning_path_id
+                    == learning_path_id,
+                    LearningPathItem.topic_id == 1
+                )
+                .first()
+            )
+
+            # Verify the topic starts as pending.
+            assert item_before is not None
+            assert item_before.status == "pending"
+            assert (
+                item_before.recommended_action
+                == "explain"
+            )
+
+            # Simulate a successful assessment
+            # by creating a high mastery score.
+            mastery = TopicMastery(
+                user_id=test_user_id,
+                topic_id=1,
+                mastery_score=90,
+                weak_areas=[]
+            )
+
+            db.add(mastery)
+            db.commit()
+
+            # Update the learning path using
+            # the learner's latest mastery.
+            result = update_learning_path(
+                db=db,
+                user_id=test_user_id,
+                learning_path_id=learning_path_id,
+                topic_id=1
+            )
+
+            # Verify the returned update result.
+            assert result["learning_path_id"] == (
+                learning_path_id
+            )
+            assert result["topic_id"] == 1
+            assert result["status"] == "completed"
+            assert (
+                result["recommended_action"]
+                == "recommend"
+            )
+
+            # Load the item again directly from
+            # the database to verify persistence.
+            item_after = (
+                db.query(LearningPathItem)
+                .filter(
+                    LearningPathItem.learning_path_id
+                    == learning_path_id,
+                    LearningPathItem.topic_id == 1
+                )
+                .first()
+            )
+
+            # Verify the database was updated.
+            assert item_after.status == "completed"
+            assert (
+                item_after.recommended_action
+                == "recommend"
+            )
+
+        finally:
+            # Reset the session if a database
+            # operation failed during the test.
+            db.rollback()
+
+            # Delete temporary learning path items.
+            (
+                db.query(LearningPathItem)
+                .filter(
+                    LearningPathItem.learning_path_id
+                    == learning_path_id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            # Delete the temporary learning path.
+            (
+                db.query(LearningPath)
+                .filter(
+                    LearningPath.learning_path_id
+                    == learning_path_id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            # Delete temporary mastery records.
+            (
+                db.query(TopicMastery)
+                .filter(
+                    TopicMastery.user_id
+                    == test_user_id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            # Delete the temporary learner.
+            (
+                db.query(User)
+                .filter(
+                    User.user_id == test_user_id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            # Save all cleanup operations.
+            db.commit()
+
+
+def test_update_learning_path_with_low_mastery():
+    """
+    Test that a learning path item remains pending
+    when the learner still has low mastery.
+    """
+
+    # Open a database session for the test.
+    with SessionLocal() as db:
+
+        # Generate a unique email for every test run
+        # to avoid conflicts with existing test data.
+        unique_email = (
+            f"update.low.mastery.{uuid.uuid4().hex}"
+            "@mindcompass.local"
+        )
+
+        # Create a temporary learner
+        # for this test only.
+        test_user = User(
+            name="Low Mastery Test User",
+            email=unique_email,
+            password_hash="test_hash",
+            role="learner"
+        )
+
+        db.add(test_user)
+        db.commit()
+        db.refresh(test_user)
+
+        # Store the user ID separately
+        # for safe cleanup.
+        test_user_id = test_user.user_id
+
+        # Initialize the learning path ID
+        # so cleanup can safely check it.
+        learning_path_id = None
+
+        try:
+            # Create a learning path for Python Basics.
+            path_result = create_learning_path(
+                db=db,
+                user_id=test_user_id,
+                target_topic_id=1,
+                path_name="Python Low Mastery Path",
+                goal="Learn Python"
+            )
+
+            learning_path_id = (
+                path_result["learning_path_id"]
+            )
+
+            # Create a low mastery score
+            # for Python Basics.
+            mastery = TopicMastery(
+                user_id=test_user_id,
+                topic_id=1,
+                mastery_score=60,
+                weak_areas=["functions"]
+            )
+
+            db.add(mastery)
+            db.commit()
+
+            # Update the learning path using
+            # the learner's latest mastery.
+            result = update_learning_path(
+                db=db,
+                user_id=test_user_id,
+                learning_path_id=learning_path_id,
+                topic_id=1
+            )
+
+            # The topic should remain pending
+            # because mastery is below the threshold.
+            assert result["status"] == "pending"
+
+            # The learner still needs explanation
+            # before completing this topic.
+            assert (
+                result["recommended_action"]
+                == "practice"
+            )
+
+            # Verify the updated values were
+            # persisted in the database.
+            item = (
+                db.query(LearningPathItem)
+                .filter(
+                    LearningPathItem.learning_path_id
+                    == learning_path_id,
+                    LearningPathItem.topic_id == 1
+                )
+                .first()
+            )
+
+            assert item is not None
+            assert item.status == "pending"
+            assert (
+                item.recommended_action
+                == "practice"
+            )
+
+        finally:
+            # Reset the session if a database
+            # operation failed during the test.
+            db.rollback()
+
+            # Delete the temporary learning path
+            # and its items if they were created.
+            if learning_path_id is not None:
+                (
+                    db.query(LearningPathItem)
+                    .filter(
+                        LearningPathItem.learning_path_id
+                        == learning_path_id
+                    )
+                    .delete(
+                        synchronize_session=False
+                    )
+                )
+
+                (
+                    db.query(LearningPath)
+                    .filter(
+                        LearningPath.learning_path_id
+                        == learning_path_id
+                    )
+                    .delete(
+                        synchronize_session=False
+                    )
+                )
+
+            # Delete temporary mastery records.
+            (
+                db.query(TopicMastery)
+                .filter(
+                    TopicMastery.user_id
+                    == test_user_id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            # Delete the temporary learner.
+            (
+                db.query(User)
+                .filter(
+                    User.user_id == test_user_id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            # Save all cleanup operations.
+            db.commit()
+
+
+def test_get_topic_recommended_action():
+    """
+    Test recommended learning actions
+    for different mastery score ranges.
+    """
+
+    # Open a database session for the test.
+    with SessionLocal() as db:
+
+        # Generate a unique email for every test run
+        # to avoid conflicts with existing test data.
+        unique_email = (
+            f"recommendation.test.{uuid.uuid4().hex}"
+            "@mindcompass.local"
+        )
+
+        # Create a temporary learner
+        # for this test only.
+        test_user = User(
+            name="Recommendation Test User",
+            email=unique_email,
+            password_hash="test_hash",
+            role="learner"
+        )
+
+        db.add(test_user)
+        db.commit()
+        db.refresh(test_user)
+
+        # Store the user ID separately
+        # for safe cleanup.
+        test_user_id = test_user.user_id
+
+        try:
+            # No assessment exists yet,
+            # so the learner should start with explanation.
+            action = get_topic_recommended_action(
+                db=db,
+                user_id=test_user_id,
+                topic_id=1
+            )
+
+            assert action == "explain"
+
+            # Create the learner's first mastery record
+            # for Python Basics.
+            mastery = TopicMastery(
+                user_id=test_user_id,
+                topic_id=1,
+                mastery_score=30,
+                weak_areas=[]
+            )
+
+            db.add(mastery)
+            db.commit()
+
+            # A score below 40 requires explanation.
+            action = get_topic_recommended_action(
+                db=db,
+                user_id=test_user_id,
+                topic_id=1
+            )
+
+            assert action == "explain"
+
+            # A score from 40 to 69
+            # requires additional practice.
+            mastery.mastery_score = 60
+            db.commit()
+
+            action = get_topic_recommended_action(
+                db=db,
+                user_id=test_user_id,
+                topic_id=1
+            )
+
+            assert action == "practice"
+
+            # A score from 70 to 84
+            # requires targeted review.
+            mastery.mastery_score = 75
+            db.commit()
+
+            action = get_topic_recommended_action(
+                db=db,
+                user_id=test_user_id,
+                topic_id=1
+            )
+
+            assert action == "review"
+
+            # A score of 85 or higher means
+            # the topic is completed and the learner
+            # should move to the next recommended step.
+            mastery.mastery_score = 90
+            db.commit()
+
+            action = get_topic_recommended_action(
+                db=db,
+                user_id=test_user_id,
+                topic_id=1
+            )
+
+            assert action == "recommend"
+
+        finally:
+            # Reset the session if a database
+            # operation failed during the test.
+            db.rollback()
+
+            # Delete the temporary mastery record.
+            (
+                db.query(TopicMastery)
+                .filter(
+                    TopicMastery.user_id
+                    == test_user_id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            # Delete the temporary learner.
+            (
+                db.query(User)
+                .filter(
+                    User.user_id == test_user_id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            # Save all cleanup operations.
+            db.commit()
+
+
+def test_create_learning_path_with_review_action():
+    """
+    Test that a learning path recommends review
+    when the learner has a mastery score between 70 and 84.
+    """
+
+    # Open a database session for the test.
+    with SessionLocal() as db:
+
+        # Generate a unique email for every test run
+        # to avoid conflicts with existing test data.
+        unique_email = (
+            f"review.path.{uuid.uuid4().hex}"
+            "@mindcompass.local"
+        )
+
+        # Create a temporary learner
+        # for this test only.
+        test_user = User(
+            name="Review Path Test User",
+            email=unique_email,
+            password_hash="test_hash",
+            role="learner"
+        )
+
+        db.add(test_user)
+        db.commit()
+        db.refresh(test_user)
+
+        test_user_id = test_user.user_id
+        learning_path_id = None
+
+        try:
+            # Simulate a previous assessment where
+            # the learner scored 75% in Machine Learning.
+            mastery = TopicMastery(
+                user_id=test_user_id,
+                topic_id=2,
+                mastery_score=75,
+                weak_areas=["model evaluation"]
+            )
+
+            db.add(mastery)
+            db.commit()
+
+            # Create a learning path targeting
+            # Machine Learning Basics.
+            result = create_learning_path(
+                db=db,
+                user_id=test_user_id,
+                target_topic_id=2,
+                path_name="ML Review Test Path",
+                goal="Learn Machine Learning"
+            )
+
+            learning_path_id = result[
+                "learning_path_id"
+            ]
+
+            # Load the Machine Learning item
+            # created inside the personalized path.
+            ml_item = (
+                db.query(LearningPathItem)
+                .filter(
+                    LearningPathItem.learning_path_id
+                    == learning_path_id,
+                    LearningPathItem.topic_id == 2
+                )
+                .first()
+            )
+
+            # A score of 75 is below the completion
+            # threshold, so the topic remains pending.
+            assert ml_item is not None
+            assert ml_item.status == "pending"
+
+            # A score between 70 and 84 should
+            # produce a targeted review recommendation.
+            assert (
+                ml_item.recommended_action
+                == "review"
+            )
+
+        finally:
+            db.rollback()
+
+            # Delete the temporary learning path items
+            # if a learning path was successfully created.
+            if learning_path_id is not None:
+                (
+                    db.query(LearningPathItem)
+                    .filter(
+                        LearningPathItem.learning_path_id
+                        == learning_path_id
+                    )
+                    .delete(
+                        synchronize_session=False
+                    )
+                )
+
+                # Delete the temporary learning path.
+                (
+                    db.query(LearningPath)
+                    .filter(
+                        LearningPath.learning_path_id
+                        == learning_path_id
+                    )
+                    .delete(
+                        synchronize_session=False
+                    )
+                )
+
+            # Delete the temporary mastery record.
+            (
+                db.query(TopicMastery)
+                .filter(
+                    TopicMastery.user_id
+                    == test_user_id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            # Delete the temporary learner.
+            (
+                db.query(User)
+                .filter(
+                    User.user_id == test_user_id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            db.commit()
+
+
+def test_complete_learning_path():
+    """
+    Test that a learning path can be marked
+    as completed successfully.
+    """
+
+    # Open a database session for the test.
+    with SessionLocal() as db:
+
+        # Load the existing test learning path.
+        learning_path = (
+            db.query(LearningPath)
+            .filter(
+                LearningPath.learning_path_id == 1
+            )
+            .first()
+        )
+
+        # Make sure the required test data exists.
+        assert learning_path is not None
+
+        # Store the original status so the test
+        # does not affect other tests.
+        original_status = learning_path.status
+
+        try:
+            # Make sure the path starts as active
+            # before testing completion.
+            learning_path.status = "active"
+            db.commit()
+
+            # Mark the learning path as completed.
+            result = complete_learning_path(
+                db=db,
+                learning_path_id=1
+            )
+
+            # Verify the returned result.
+            assert result["learning_path_id"] == 1
+            assert result["status"] == "completed"
+
+            # Reload the database state.
+            db.expire_all()
+
+            updated_path = (
+                db.query(LearningPath)
+                .filter(
+                    LearningPath.learning_path_id == 1
+                )
+                .first()
+            )
+
+            # Verify that the change was
+            # persisted in the database.
+            assert updated_path is not None
+            assert updated_path.status == "completed"
+
+        finally:
+            # Roll back any failed transaction
+            # before restoring the test data.
+            db.rollback()
+
+            # Reload the learning path.
+            learning_path = (
+                db.query(LearningPath)
+                .filter(
+                    LearningPath.learning_path_id == 1
+                )
+                .first()
+            )
+
+            # Restore its original status.
+            if learning_path is not None:
+                learning_path.status = original_status
+                db.commit()

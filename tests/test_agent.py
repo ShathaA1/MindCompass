@@ -4,6 +4,8 @@ from app.agent.graph import (
     load_active_learning_path,
     load_topic_mastery,
     build_tutor_graph,
+    update_learning_path_node,
+    recommend_node,
 )
 from app.agent.planning import (
     determine_learner_need,
@@ -12,6 +14,12 @@ from app.agent.planning import (
     recommend_next_action,
     resolve_action,
     route_recommended_action,
+)
+
+from app.database.models import (
+    TopicMastery,
+    LearningPathItem,
+    LearningPath,
 )
 
 def test_load_learner_context():
@@ -521,8 +529,10 @@ def test_recommend_next_action_strong_mastery():
     # Get the recommended learning action
     result = recommend_next_action(state)
 
-    # Strong mastery should lead to assessment
-    assert result["recommended_action"] == "assess"
+    # A high mastery score means the learner
+    # has completed the current topic and
+    # should move to the next recommended step.
+    assert result["recommended_action"] == "recommend"
 
 
 
@@ -552,16 +562,18 @@ def test_resolve_action_explicit_assess():
     is used as the final action.
     """
 
-    # Simulate a learner who explicitly asks for assessment
+    # Simulate a learner who explicitly asks
+    # for an assessment.
     state = {
         "learner_need": "assess",
         "recommended_action": "explain",
     }
 
-    # Resolve the final agent action
+    # Resolve the final agent action.
     result = resolve_action(state)
 
-    # The explicit learner request should be used
+    # The learner explicitly requested an assessment,
+    # so the agent should respect that request.
     assert result["recommended_action"] == "assess"
 
 
@@ -788,3 +800,459 @@ def test_tutor_graph_routes_to_teach():
     # The explanation recommendation should
     # route the workflow to the teaching node.
     assert result["response"] == "Teaching action selected."
+
+
+def test_route_recommended_action_to_recommend():
+    """
+    Test that the router sends a completed topic
+    to the recommendation workflow.
+    """
+
+    # Simulate a final agent decision where
+    # the learner has completed the current topic
+    # and needs a recommendation for the next step.
+    state = {
+        "recommended_action": "recommend"
+    }
+
+    # Route the final recommended action.
+    result = route_recommended_action(state)
+
+    # The workflow should continue
+    # to the recommendation node.
+    assert result == "recommend"
+
+
+def test_tutor_graph_routes_high_mastery_to_recommend():
+    """
+    Test that the Tutor Agent routes a learner
+    with high topic mastery to the recommendation node
+    and completes the learning path when no topics remain.
+    """
+
+    # Open a database session for the test.
+    with SessionLocal() as db:
+
+        # Load the existing mastery record
+        # for the Agentic AI topic.
+        mastery = (
+            db.query(TopicMastery)
+            .filter(
+                TopicMastery.user_id == 2,
+                TopicMastery.topic_id == 3
+            )
+            .first()
+        )
+
+        # Load the Agentic AI learning path item
+        # so its original state can be restored later.
+        path_item = (
+            db.query(LearningPathItem)
+            .filter(
+                LearningPathItem.learning_path_id == 1,
+                LearningPathItem.topic_id == 3
+            )
+            .first()
+        )
+
+        # Load the learning path so its original
+        # status can be restored after the test.
+        learning_path = (
+            db.query(LearningPath)
+            .filter(
+                LearningPath.learning_path_id == 1
+            )
+            .first()
+        )
+
+        # Make sure all required test data exists.
+        assert mastery is not None
+        assert path_item is not None
+        assert learning_path is not None
+
+        # Store the original database values
+        # so the test does not affect other tests.
+        original_score = mastery.mastery_score
+        original_status = path_item.status
+        original_action = path_item.recommended_action
+        original_path_status = learning_path.status
+
+        try:
+            # Make sure the learning path is active
+            # before running the graph.
+            learning_path.status = "active"
+
+            # Make sure Agentic AI is the current
+            # pending topic before running the graph.
+            path_item.status = "pending"
+            path_item.recommended_action = "explain"
+
+            # Simulate a successful assessment
+            # with a high mastery score.
+            mastery.mastery_score = 90
+
+            # Save the test setup.
+            db.commit()
+
+            # Build the complete Tutor Agent graph.
+            graph = build_tutor_graph()
+
+            # Run the graph for the test learner.
+            result = graph.invoke(
+                {
+                    "user_id": 2,
+                    "session_id": 1,
+                    "user_message": (
+                        "What should I learn next?"
+                    )
+                }
+            )
+
+            # High mastery should cause the agent
+            # to recommend the learner's next step.
+            assert (
+                result["recommended_action"]
+                == "recommend"
+            )
+
+            # Because Agentic AI is the final topic
+            # in this learning path, the recommendation
+            # node should detect path completion.
+            assert (
+                result["response"]
+                == (
+                    "You have completed all topics "
+                    "in your learning path."
+                )
+            )
+
+            # Refresh database state because the graph
+            # uses separate database sessions.
+            db.expire_all()
+
+            # Reload the Agentic AI learning path item
+            # after the graph has completed.
+            updated_item = (
+                db.query(LearningPathItem)
+                .filter(
+                    LearningPathItem.learning_path_id == 1,
+                    LearningPathItem.topic_id == 3
+                )
+                .first()
+            )
+
+            # Verify that the current topic was marked
+            # as completed before recommendation.
+            assert updated_item is not None
+            assert updated_item.status == "completed"
+
+            # Verify that the completed topic now
+            # recommends moving to the next step.
+            assert (
+                updated_item.recommended_action
+                == "recommend"
+            )
+
+            # Reload the learning path after the graph
+            # completes the final topic.
+            updated_path = (
+                db.query(LearningPath)
+                .filter(
+                    LearningPath.learning_path_id == 1
+                )
+                .first()
+            )
+
+            # Verify that completing the final topic
+            # also completes the entire learning path.
+            assert updated_path is not None
+            assert updated_path.status == "completed"
+
+            # Verify that the completed path status
+            # is also reflected in TutorState.
+            assert (
+                result["learning_path"]["status"]
+                == "completed"
+            )
+
+        finally:
+            # Roll back any failed transaction
+            # before restoring the test data.
+            db.rollback()
+
+            # Reload the mastery record because
+            # the graph used separate database sessions.
+            mastery = (
+                db.query(TopicMastery)
+                .filter(
+                    TopicMastery.user_id == 2,
+                    TopicMastery.topic_id == 3
+                )
+                .first()
+            )
+
+            # Reload the learning path item
+            # before restoring its original state.
+            path_item = (
+                db.query(LearningPathItem)
+                .filter(
+                    LearningPathItem.learning_path_id == 1,
+                    LearningPathItem.topic_id == 3
+                )
+                .first()
+            )
+
+            # Reload the learning path because
+            # the graph updated it in another session.
+            learning_path = (
+                db.query(LearningPath)
+                .filter(
+                    LearningPath.learning_path_id == 1
+                )
+                .first()
+            )
+
+            # Restore the original mastery score.
+            if mastery is not None:
+                mastery.mastery_score = original_score
+
+            # Restore the original learning path
+            # item status and recommended action.
+            if path_item is not None:
+                path_item.status = original_status
+                path_item.recommended_action = (
+                    original_action
+                )
+
+            # Restore the original learning path status.
+            if learning_path is not None:
+                learning_path.status = (
+                    original_path_status
+                )
+
+            # Save all restored test data.
+            db.commit()
+
+
+def test_update_learning_path_node_after_high_mastery():
+    """
+    Test that the graph node marks the current topic
+    as completed after a high mastery score.
+    """
+
+    # Open a database session for test setup.
+    with SessionLocal() as db:
+
+        # Load the existing Agentic AI mastery record.
+        mastery = (
+            db.query(TopicMastery)
+            .filter(
+                TopicMastery.user_id == 2,
+                TopicMastery.topic_id == 3
+            )
+            .first()
+        )
+
+        # Load the current Agentic AI learning path item.
+        path_item = (
+            db.query(LearningPathItem)
+            .filter(
+                LearningPathItem.learning_path_id == 1,
+                LearningPathItem.topic_id == 3
+            )
+            .first()
+        )
+
+        # Make sure the required test data exists.
+        assert mastery is not None
+        assert path_item is not None
+
+        # Store the original values so the database
+        # can be restored after the test.
+        original_score = mastery.mastery_score
+        original_status = path_item.status
+        original_action = path_item.recommended_action
+
+        try:
+            # Simulate a successful assessment.
+            mastery.mastery_score = 90
+
+            # Keep the topic pending before running
+            # the update node.
+            path_item.status = "pending"
+            path_item.recommended_action = "explain"
+
+            db.commit()
+
+            # Create the state expected by
+            # the update learning path node.
+            state = {
+                "user_id": 2,
+                "learning_path": {
+                    "learning_path_id": 1
+                },
+                "current_topic": {
+                    "topic_id": 3,
+                    "name": "Introduction to Agentic AI"
+                }
+            }
+
+            # Run the graph node.
+            result = update_learning_path_node(
+                state
+            )
+
+            # Verify the state returned by the node.
+            assert (
+                result["current_topic"]["status"]
+                == "completed"
+            )
+
+            assert (
+                result["current_topic"][
+                    "recommended_action"
+                ]
+                == "recommend"
+            )
+
+            # Refresh the database objects because
+            # the graph node used a separate session.
+            db.expire_all()
+
+            updated_item = (
+                db.query(LearningPathItem)
+                .filter(
+                    LearningPathItem.learning_path_id
+                    == 1,
+                    LearningPathItem.topic_id == 3
+                )
+                .first()
+            )
+
+            # Verify that the update was persisted
+            # in the database.
+            assert updated_item.status == "completed"
+
+            assert (
+                updated_item.recommended_action
+                == "recommend"
+            )
+
+        finally:
+            # Restore the original test data.
+            mastery = (
+                db.query(TopicMastery)
+                .filter(
+                    TopicMastery.user_id == 2,
+                    TopicMastery.topic_id == 3
+                )
+                .first()
+            )
+
+            path_item = (
+                db.query(LearningPathItem)
+                .filter(
+                    LearningPathItem.learning_path_id
+                    == 1,
+                    LearningPathItem.topic_id == 3
+                )
+                .first()
+            )
+
+            mastery.mastery_score = original_score
+            path_item.status = original_status
+            path_item.recommended_action = (
+                original_action
+            )
+
+            db.commit()
+
+
+def test_recommend_node_selects_next_topic():
+    """
+    Test that the recommendation node selects
+    the next available topic in the learning path.
+    """
+
+    # Open a database session for test setup.
+    with SessionLocal() as db:
+
+        # Load the Machine Learning item.
+        ml_item = (
+            db.query(LearningPathItem)
+            .filter(
+                LearningPathItem.learning_path_id == 1,
+                LearningPathItem.topic_id == 2
+            )
+            .first()
+        )
+
+        # Load the Agentic AI item.
+        agentic_item = (
+            db.query(LearningPathItem)
+            .filter(
+                LearningPathItem.learning_path_id == 1,
+                LearningPathItem.topic_id == 3
+            )
+            .first()
+        )
+
+        # Make sure the required test data exists.
+        assert ml_item is not None
+        assert agentic_item is not None
+
+        # Store the original values so the database
+        # can be restored after the test.
+        original_ml_status = ml_item.status
+        original_agentic_status = agentic_item.status
+
+        try:
+            # Simulate a state where Machine Learning
+            # has been completed and Agentic AI is next.
+            ml_item.status = "completed"
+            agentic_item.status = "pending"
+
+            db.commit()
+
+            # Create the state expected
+            # by the recommendation node.
+            state = {
+                "user_id": 2,
+                "learning_path": {
+                    "learning_path_id": 1
+                },
+                "current_topic": {
+                    "topic_id": 2,
+                    "name": "Machine Learning Basics"
+                }
+            }
+
+            # Run the recommendation node.
+            result = recommend_node(state)
+
+            # Verify that Agentic AI was selected
+            # as the learner's next topic.
+            assert (
+                result["next_topic_id"]
+                == 3
+            )
+
+            assert (
+                result["current_topic"]["topic_id"]
+                == 3
+            )
+
+            assert (
+                result["current_topic"]["name"]
+                == "Introduction to Agentic AI"
+            )
+
+        finally:
+            # Restore the original learning path
+            # item statuses after the test.
+            ml_item.status = original_ml_status
+            agentic_item.status = (
+                original_agentic_status
+            )
+
+            db.commit()
