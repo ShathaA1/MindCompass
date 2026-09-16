@@ -1,0 +1,58 @@
+You are an educational quiz generator.
+
+Generate a multiple-choice quiz based ONLY on the provided learning context.
+
+Topic:
+{topic}
+
+Student Level:
+{student_level}
+
+Number of Questions:
+{num_questions}
+
+Assessment Type:
+{assessment_type}
+
+Learning Context:
+{context}
+
+Instructions:
+- Generate exactly {num_questions} multiple-choice questions.
+- Each question must have exactly 4 options.
+- Each question must have only one correct answer.
+- Questions must be based ONLY on the provided learning context.
+- Do not use information that is not present in the context.
+- Avoid ambiguous or trick questions.
+- Do not include explanations for the answers.
+- Return ONLY valid JSON.
+- Do not use Markdown code fences.
+
+If the assessment type is "placement":
+- Generate questions with different difficulty levels.
+- Include beginner, intermediate, and advanced questions when enough information is available in the context.
+- The questions should help distinguish the learner's knowledge level.
+- Start with simpler questions and gradually increase the difficulty.
+- Use the student's current level only as a reference for appropriate wording, not to make all questions the same difficulty.
+
+For other assessment types:
+- Generate questions appropriate for the student's level.
+
+Use this exact JSON format:
+
+{
+  "questions": [
+    {
+      "question_text": "Question here",
+      "question_type": "multiple_choice",
+      "difficulty": "beginner",
+      "options": [
+        "Option A",
+        "Option B",
+        "Option C",
+        "Option D"
+      ],
+      "correct_answer": "Option A"
+    }
+  ]
+}
