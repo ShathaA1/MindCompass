@@ -199,3 +199,187 @@ def get_topic_mastery(
         "weak_areas": mastery.weak_areas,
         "last_assessed_at": mastery.last_assessed_at,
     }
+
+
+def get_required_topic_ids(
+    db: Session,
+    topic_id: int
+) -> list[int]:
+    """
+    Get all prerequisite topics required for a target topic
+    in the correct learning order.
+    """
+
+    # Store the topics in learning order.
+    required_topic_ids = []
+
+    # Keep track of visited topics to avoid
+    # processing the same topic more than once.
+    visited = set()
+
+    def collect_prerequisites(
+        current_topic_id: int
+    ) -> None:
+        """
+        Recursively collect prerequisites
+        before adding the current topic.
+        """
+
+        # Skip topics that have already been processed.
+        if current_topic_id in visited:
+            return
+
+        # Mark the topic as visited.
+        visited.add(current_topic_id)
+
+        # Get all direct prerequisites
+        # required for the current topic.
+        prerequisites = (
+            db.query(TopicPrerequisite)
+            .filter(
+                TopicPrerequisite.topic_id
+                == current_topic_id
+            )
+            .all()
+        )
+
+        # Process prerequisites first so they appear
+        # before the current topic in the learning path.
+        for prerequisite in prerequisites:
+            collect_prerequisites(
+                prerequisite.prerequisite_topic_id
+            )
+
+        # Add the current topic only after
+        # all of its prerequisites.
+        required_topic_ids.append(
+            current_topic_id
+        )
+
+    # Start from the learner's target topic.
+    collect_prerequisites(topic_id)
+
+    return required_topic_ids
+
+
+def create_learning_path(
+    db: Session,
+    user_id: int,
+    target_topic_id: int,
+    path_name: str,
+    goal: str
+) -> dict:
+    """
+    Create a new learning path for a learner
+    based on the target topic and its prerequisites.
+    """
+
+    # Get all topics required to reach the target topic
+    # in the correct learning order.
+    required_topic_ids = get_required_topic_ids(
+        db=db,
+        topic_id=target_topic_id
+    )
+
+    # Create the learner's new active learning path.
+    learning_path = LearningPath(
+        user_id=user_id,
+        name=path_name,
+        goal=goal,
+        status="active"
+    )
+
+    # Add the learning path to the current transaction
+    # so its ID can be generated.
+    db.add(learning_path)
+    db.flush()
+
+    # Create one learning path item
+    # for every required topic.
+    for position, topic_id in enumerate(
+        required_topic_ids,
+        start=1
+    ):
+        # Determine whether the learner already
+        # mastered this topic before creating the path.
+        initial_status = get_initial_topic_status(
+            db=db,
+            user_id=user_id,
+            topic_id=topic_id
+        )
+
+        # Completed topics do not need another
+        # learning recommendation.
+        if initial_status == "completed":
+            recommended_action = "assess"
+        else:
+            # Topics that still need to be learned
+            # should start with an explanation.
+            recommended_action = "explain"
+
+        # Create the personalized learning path item.
+        learning_path_item = LearningPathItem(
+            learning_path_id=learning_path.learning_path_id,
+            topic_id=topic_id,
+            position=position,
+            status=initial_status,
+            recommended_action=recommended_action
+        )
+
+        db.add(learning_path_item)
+
+    # Save the learning path and all of its items.
+    db.commit()
+
+    # Refresh the object with the latest
+    # values stored in the database.
+    db.refresh(learning_path)
+
+    # Return the created learning path information.
+    return {
+        "learning_path_id": learning_path.learning_path_id,
+        "user_id": learning_path.user_id,
+        "name": learning_path.name,
+        "goal": learning_path.goal,
+        "status": learning_path.status,
+        "topic_ids": required_topic_ids,
+    }
+
+
+def get_initial_topic_status(
+    db: Session,
+    user_id: int,
+    topic_id: int
+) -> str:
+    """
+    Determine the initial learning path status
+    for a topic based on learner mastery.
+    """
+
+    # Get the learner's existing mastery
+    # information for this topic.
+    topic_mastery = get_topic_mastery(
+        db=db,
+        user_id=user_id,
+        topic_id=topic_id
+    )
+
+    # If the learner has never been assessed
+    # on this topic, it should remain pending.
+    if not topic_mastery:
+        return "pending"
+
+    # Read the learner's mastery score.
+    mastery_score = topic_mastery.get(
+        "mastery_score",
+        0
+    )
+
+    # Consider strongly mastered topics completed
+    # when building the initial learning path.
+    if mastery_score >= 85:
+        return "completed"
+
+    # Topics below the mastery threshold
+    # still need to be studied.
+    return "pending"
