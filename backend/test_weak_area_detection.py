@@ -12,7 +12,7 @@ Question 2:
 Concept: Attention Mechanism
 Learner Answer: A sorting mechanism
 Correct Answer: An attention mechanism
-Result: Correct
+Result: Incorrect
 
 Question 3:
 Concept: Parallel Processing
@@ -24,7 +24,8 @@ Question 4:
 Concept: Sequence Relationships
 Learner Answer: A storage mechanism
 Correct Answer: Relationships between different tokens in a sequence
-Result: Correct"""
+Result: Incorrect
+"""
 
 
 result = detect_weak_areas.invoke(
