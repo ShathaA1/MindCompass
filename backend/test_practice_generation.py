@@ -1,15 +1,39 @@
+import json
+
+from app.rag.retrieval import retrieve
 from app.tools.practice_generation import generate_practice
 
 
-context = """
-Transformers are a type of neural network architecture commonly used
-in natural language processing. They use an attention mechanism to
-identify relationships between different tokens in a sequence.
-Unlike traditional recurrent neural networks, Transformers can process
-tokens in parallel.
-"""
+def main():
+    query = "What is the attention mechanism in Transformers?"
 
-weak_areas = """
+    # Retrieve real course content from RAG
+    results = retrieve(query=query, top_k=5)
+
+    if not results:
+        raise ValueError("RAG returned no results.")
+
+    # Build learning context from retrieved course content
+    context = "\n\n".join(
+        result["text"]
+        for result in results
+    )
+
+    # Get topic information from RAG metadata
+    topic = None
+
+    for result in results:
+        source = result.get("source", {})
+        lesson_name = source.get("lesson_name")
+
+        if lesson_name:
+            topic = lesson_name
+            break
+
+    if topic is None:
+        topic = "Attention Mechanism in Transformers"
+
+    weak_areas = """
 [
     {
         "area": "Attention Mechanism",
@@ -18,16 +42,34 @@ weak_areas = """
 ]
 """
 
+    print("RAG RESULTS:")
+    for index, result in enumerate(results, start=1):
+        source = result.get("source", {})
 
-result = generate_practice.invoke(
-    {
-        "topic": "Transformers",
-        "context": context,
-        "student_level": "beginner",
-        "practice_type": "true_false",
-        "num_items": 5,
-        "weak_areas": weak_areas,
-    }
-)
+        print(f"\nResult {index}:")
+        print(f"Similarity: {result.get('similarity_score')}")
+        print(f"Topic ID: {result.get('topic_id')}")
+        print(f"Source: {source}")
 
-print(result)
+    print("\nPRACTICE TOPIC:")
+    print(topic)
+
+    result = generate_practice.invoke(
+        {
+            "topic": topic,
+            "context": context,
+            "student_level": "beginner",
+            "practice_type": "true_false",
+            "num_items": 5,
+            "weak_areas": weak_areas,
+        }
+    )
+
+    practice = json.loads(result)
+
+    print("\nGENERATED PRACTICE:")
+    print(json.dumps(practice, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()
