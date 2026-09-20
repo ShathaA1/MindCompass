@@ -24,6 +24,8 @@ langgraph
 chromadb
 pypdf
 nbformat
+PyMuPDF
+beautifulsoup4
 
 # Frontend
 streamlit

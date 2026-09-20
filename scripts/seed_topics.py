@@ -259,9 +259,10 @@ def main() -> None:
     with SessionLocal() as session:
         topics = seed_topics(session, source_root)
 
-    print(f"Seeded/updated {len(topics)} topics:")
-    for topic in topics:
-        print(f"  [{topic.topic_id}] {topic.name}")
+        print(f"Seeded/updated {len(topics)} topics:")
+        for topic in topics:
+            print(f"  [{topic.topic_id}] {topic.name}")
+        
     print(f"\nWrote folder->topic_id map to: {TOPIC_FOLDER_MAP_PATH}")
 
 

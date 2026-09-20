@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from app.database.connection import SessionLocal
 from app.agent.graph import (
     load_learner_context,
@@ -6,6 +7,7 @@ from app.agent.graph import (
     build_tutor_graph,
     update_learning_path_node,
     recommend_node,
+    load_conversation_history,
 )
 from app.agent.planning import (
     determine_learner_need,
@@ -20,6 +22,8 @@ from app.database.models import (
     TopicMastery,
     LearningPathItem,
     LearningPath,
+    ChatSession,
+    ChatMessage,
 )
 
 def test_load_learner_context():
@@ -438,6 +442,100 @@ def test_load_topic_mastery_without_current_topic():
         db.close()
 
 
+def test_load_conversation_history():
+    """
+    Test that recent chat messages are loaded
+    into TutorState as conversation history.
+    """
+
+    with SessionLocal() as db:
+        session = None
+
+        try:
+            # Create a temporary chat session
+            # for the existing test learner.
+            session = ChatSession(
+                user_id=2,
+                session_name="Agent Memory Test",
+                started_at=datetime.now(timezone.utc)
+            )
+
+            db.add(session)
+            db.flush()
+
+            # Add temporary conversation messages.
+            user_message = ChatMessage(
+                session_id=session.chat_session_id,
+                role="user",
+                content="Explain AI agents."
+            )
+
+            assistant_message = ChatMessage(
+                session_id=session.chat_session_id,
+                role="assistant",
+                content="An AI agent can make decisions and take actions.",
+                agent_action="explain"
+            )
+
+            db.add_all([
+                user_message,
+                assistant_message
+            ])
+            db.commit()
+
+            # Create the TutorState with the
+            # temporary chat session ID.
+            state = {
+                "user_id": 2,
+                "session_id": session.chat_session_id,
+                "user_message": "Can you explain it again?"
+            }
+
+            # Load conversation memory into the state.
+            result = load_conversation_history(
+                state=state,
+                db=db
+            )
+
+            # Verify that conversation history
+            # was added to the returned state update.
+            assert "conversation_history" in result
+
+            # Verify that both messages were loaded.
+            assert len(result["conversation_history"]) == 2
+
+            # Verify chronological message order.
+            assert (
+                result["conversation_history"][0]["role"]
+                == "user"
+            )
+
+            assert (
+                result["conversation_history"][0]["content"]
+                == "Explain AI agents."
+            )
+
+            assert (
+                result["conversation_history"][1]["role"]
+                == "assistant"
+            )
+
+        finally:
+            # Remove temporary messages first
+            # because they reference the chat session.
+            if session is not None:
+                db.query(ChatMessage).filter(
+                    ChatMessage.session_id
+                    == session.chat_session_id
+                ).delete()
+
+                # Remove the temporary chat session.
+                db.query(ChatSession).filter(
+                    ChatSession.chat_session_id
+                    == session.chat_session_id
+                ).delete()
+
+                db.commit()
 
 def test_recommend_next_action_no_mastery():
     """
@@ -673,6 +771,14 @@ def test_tutor_graph_end_to_end():
     # Run the complete Tutor Agent workflow.
     result = graph.invoke(initial_state)
 
+    # Verify that conversation history
+    # was loaded into TutorState.
+    assert "conversation_history" in result
+
+    # No session_id was provided in this test,
+    # so the conversation history should be empty.
+    assert result["conversation_history"] == []
+
     # Verify that the learner context
     # was loaded successfully.
     assert result["learner_context"]["user_id"] == 2
@@ -701,6 +807,118 @@ def test_tutor_graph_end_to_end():
     # in an explanation recommendation.
     assert result["recommended_action"] == "explain"
 
+
+def test_tutor_graph_loads_conversation_history():
+    """
+    Test that the complete Tutor Agent workflow
+    loads recent chat messages into TutorState.
+    """
+
+    with SessionLocal() as db:
+        session = None
+
+        try:
+            # Create a temporary chat session
+            # for the existing test learner.
+            session = ChatSession(
+                user_id=2,
+                learning_path_id=1,
+                topic_id=3,
+                session_name="Graph Memory Test",
+                started_at=datetime.now(timezone.utc)
+            )
+
+            db.add(session)
+            db.flush()
+
+            # Store previous conversation messages
+            # for the temporary chat session.
+            first_message = ChatMessage(
+                session_id=session.chat_session_id,
+                role="user",
+                content="What is an AI agent?"
+            )
+
+            second_message = ChatMessage(
+                session_id=session.chat_session_id,
+                role="assistant",
+                content="An AI agent can make decisions and take actions.",
+                agent_action="explain"
+            )
+
+            db.add_all([
+                first_message,
+                second_message
+            ])
+
+            db.commit()
+
+            # Build the complete Tutor Agent workflow.
+            graph = build_tutor_graph()
+
+            # Run the graph using the temporary
+            # chat session created for this test.
+            initial_state = {
+                "user_id": 2,
+                "session_id": session.chat_session_id,
+                "user_message": "What should I learn next?"
+            }
+
+            result = graph.invoke(initial_state)
+
+            # Verify that conversation history
+            # was added to TutorState.
+            assert "conversation_history" in result
+
+            # Verify that both previous messages
+            # were loaded from the database.
+            assert len(result["conversation_history"]) == 2
+
+            # Verify that messages remain
+            # in chronological conversation order.
+            assert (
+                result["conversation_history"][0]["role"]
+                == "user"
+            )
+
+            assert (
+                result["conversation_history"][0]["content"]
+                == "What is an AI agent?"
+            )
+
+            assert (
+                result["conversation_history"][1]["role"]
+                == "assistant"
+            )
+
+            assert (
+                result["conversation_history"][1]["content"]
+                == (
+                    "An AI agent can make decisions "
+                    "and take actions."
+                )
+            )
+
+        finally:
+            # Roll back any failed transaction
+            # before cleaning up test data.
+            db.rollback()
+
+            if session is not None:
+                # Delete temporary messages first
+                # because they reference the session.
+                db.query(ChatMessage).filter(
+                    ChatMessage.session_id
+                    == session.chat_session_id
+                ).delete()
+
+                # Delete the temporary chat session.
+                db.query(ChatSession).filter(
+                    ChatSession.chat_session_id
+                    == session.chat_session_id
+                ).delete()
+
+                db.commit()
 
 
 def test_route_recommended_action_to_teach():

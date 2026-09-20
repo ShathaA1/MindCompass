@@ -7,9 +7,12 @@ class TutorState(TypedDict, total=False):
     session_id: int
     user_message: str
 
+    # Short-term conversation memory
+    conversation_history: list[dict[str, Any]]
+
     # Learner data loaded from the database
-    learner_context: dict[str, Any] 
-    learning_path: dict[str, Any] 
+    learner_context: dict[str, Any]
+    learning_path: dict[str, Any]
     current_topic: dict[str, Any]
     topic_mastery: dict[str, Any]
 

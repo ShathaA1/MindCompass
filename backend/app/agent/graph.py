@@ -21,6 +21,7 @@ from app.agent.planning import (
     route_recommended_action,
 )
 
+from app.services.chat_service import get_recent_messages
 
 def load_learner_context(
     state: TutorState,
@@ -108,6 +109,40 @@ def load_topic_mastery(
     }
 
 
+def load_conversation_history(
+    state: TutorState,
+    db: Session
+) -> dict:
+    """
+    Load recent messages from the current chat session
+    and add them to TutorState as short-term memory.
+    """
+
+    # Get the current chat session ID
+    # from the shared agent state.
+    session_id = state.get("session_id")
+
+    # If no session is available, return
+    # an empty conversation history.
+    if not session_id:
+        return {
+            "conversation_history": []
+        }
+
+    # Load the most recent messages
+    # from the current chat session.
+    conversation_history = get_recent_messages(
+        db=db,
+        session_id=session_id,
+        limit=10
+    )
+
+    # Store the recent conversation context
+    # in the shared agent state.
+    return {
+        "conversation_history": conversation_history
+    }
+
 # ------------------------------------------------------------------
 # LangGraph-compatible node wrappers
 # ------------------------------------------------------------------
@@ -178,6 +213,22 @@ def load_topic_mastery_node(
         )
 
 
+def load_conversation_history_node(
+    state: TutorState
+) -> dict:
+    """
+    LangGraph node that loads recent conversation
+    history for the current chat session.
+    """
+
+    # Open a database session for
+    # loading conversation memory.
+    with SessionLocal() as db:
+        return load_conversation_history(
+            state=state,
+            db=db
+        )
+
 
 def build_tutor_graph():
     """
@@ -193,6 +244,11 @@ def build_tutor_graph():
     workflow.add_node(
         "load_learner_context",
         load_learner_context_node
+    )
+
+    workflow.add_node(
+        "load_conversation_history",
+        load_conversation_history_node
     )
 
     workflow.add_node(
@@ -281,6 +337,11 @@ def build_tutor_graph():
 
     workflow.add_edge(
         "load_learner_context",
+        "load_conversation_history"
+    )
+
+    workflow.add_edge(
+        "load_conversation_history",
         "load_active_learning_path"
     )
 
