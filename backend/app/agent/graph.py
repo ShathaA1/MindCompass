@@ -21,6 +21,8 @@ from app.agent.planning import (
     route_recommended_action,
 )
 
+from app.agent.recommendation import build_recommendation
+
 from app.services.chat_service import get_recent_messages
 from app.services.assessment_service import save_assessment_result
 
@@ -843,6 +845,18 @@ def submit_assessment_node(
             topic_id=topic_id
         )
 
+        # Build the next-step recommendation using
+        # the learner's updated mastery information.
+        recommendation = build_recommendation(
+            mastery_score=updated_topic_mastery.get(
+                "mastery_score"
+            ),
+            weak_areas=updated_topic_mastery.get(
+                "weak_areas",
+                []
+            )
+        )
+
         # Store only the information needed by
         # the Tutor Agent after submission.
         assessment_result = {
@@ -856,10 +870,20 @@ def submit_assessment_node(
     return {
         "assessment_result": assessment_result,
         "topic_mastery": updated_topic_mastery,
+        "recommended_action": recommendation[
+            "recommended_action"
+        ],
+        "recommendation_reason": recommendation[
+            "recommendation_reason"
+        ],
         "response": (
             f"Assessment completed. "
             f"Score: {assessment_result['score']}/"
-            f"{assessment_result['max_score']}."
+            f"{assessment_result['max_score']}. "
+            f"Mastery: "
+            f"{updated_topic_mastery['mastery_score']:.0f}%. "
+            f"Recommended next step: "
+            f"{recommendation['recommended_action']}."
         ),
     }
 

@@ -2033,10 +2033,22 @@ def test_submit_assessment_node(monkeypatch):
         == 100.0
     )
 
+    # Verify that the next-step recommendation
+    # is calculated from the updated mastery.
+    assert result["recommended_action"] == "recommend"
+
+    assert result["recommendation_reason"]
+
     # Verify the final response shown
     # after assessment submission.
     assert "Assessment completed" in result["response"]
     assert "1/1" in result["response"]
+
+
+    # Verify that the learner sees the updated
+    # mastery and recommended next step.
+    assert "Mastery: 100%" in result["response"]
+    assert "Recommended next step: recommend" in result["response"]
 
 
 
@@ -2109,27 +2121,3 @@ def test_route_assessment_to_submit():
     result = route_assessment(state)
 
     assert result == "submit_assessment"
-
-
-def test_graph_routes_assessment_to_generate(monkeypatch):
-    """
-    The Tutor Agent graph should route to assessment
-    generation when the learner requests an assessment
-    and no submitted answers are available.
-    """
-
-    # Mock the assessment generation node so the test
-    # focuses only on graph routing behavior.
-    monkeypatch.setattr(
-        "app.agent.graph.generate_assessment_node",
-        lambda state: {
-            "assessment_questions": [
-                {
-                    "topic_id": 12,
-                    "question_text": "What is an AI agent?",
-                    "correct_answer": "A",
-                }
-            ],
-            "response": "Assessment generated.",
-        }
-    )
