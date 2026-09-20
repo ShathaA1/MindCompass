@@ -10,6 +10,89 @@ from app.database.models import (
 
 from app.agent.recommendation import determine_recommended_action
 
+from app.core.learning_paths import AVAILABLE_LEARNING_PATHS
+
+
+def get_available_learning_path(path_key: str) -> dict:
+    """
+    Validate the learner's selected learning path
+    and return its configuration.
+    """
+
+    # Normalize the path key before validation.
+    normalized_path_key = path_key.strip().lower()
+
+    # Make sure the selected path exists
+    # in the platform configuration.
+    if normalized_path_key not in AVAILABLE_LEARNING_PATHS:
+        raise ValueError(
+            f"Unsupported learning path: {path_key}"
+        )
+
+    # Return the selected learning path configuration.
+    return AVAILABLE_LEARNING_PATHS[normalized_path_key]
+
+def get_diagnostic_topics(
+    db: Session,
+    path_key: str
+) -> list[dict]:
+    """
+    Load the topics that should be assessed
+    before the learner starts the selected learning path.
+    """
+
+    # Validate the selected learning path
+    # and load its configuration.
+    path_config = get_available_learning_path(path_key)
+
+    # Get the prerequisite topics that should
+    # be included in the diagnostic assessment.
+    diagnostic_topic_ids = path_config.get(
+        "diagnostic_topic_ids",
+        []
+    )
+
+    # Some learning paths may not require
+    # a prerequisite diagnostic assessment.
+    if not diagnostic_topic_ids:
+        return []
+
+    # Load the diagnostic topics from the database.
+    topics = (
+        db.query(Topic)
+        .filter(Topic.topic_id.in_(diagnostic_topic_ids))
+        .all()
+    )
+
+    # Create a lookup so the final result follows
+    # the order defined in the path configuration.
+    topics_by_id = {
+        topic.topic_id: topic
+        for topic in topics
+    }
+
+    # Make sure every configured topic exists
+    # in the database.
+    missing_topic_ids = [
+        topic_id
+        for topic_id in diagnostic_topic_ids
+        if topic_id not in topics_by_id
+    ]
+
+    if missing_topic_ids:
+        raise ValueError(
+            f"Diagnostic topics not found: {missing_topic_ids}"
+        )
+
+    # Return the structure expected by
+    # the quiz generation tool.
+    return [
+        {
+            "topic_id": topic_id,
+            "topic": topics_by_id[topic_id].name,
+        }
+        for topic_id in diagnostic_topic_ids
+    ]
 
 def get_active_learning_path(
     db: Session,
@@ -542,3 +625,4 @@ def get_topic_recommended_action(
     return determine_recommended_action(
         mastery_score=mastery_score
     )
+

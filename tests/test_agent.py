@@ -21,6 +21,9 @@ from app.agent.graph import (
     practice_node,
     prepare_review_inputs,
     review_node,
+    generate_initial_diagnostic_node,
+    submit_initial_diagnostic_node,
+    route_initial_setup,
 )
 from app.agent.planning import (
     determine_learner_need,
@@ -2717,3 +2720,472 @@ def test_review_node_generates_general_review_without_weak_areas(
         "General review of the key concepts "
         "for building an AI agent."
     )
+
+
+def test_generate_initial_diagnostic_without_selected_path():
+    """
+    Test that the diagnostic cannot start
+    before the learner selects a learning path.
+    """
+
+    with SessionLocal() as db:
+        state = {
+            "learner_context": {
+                "current_level": "beginner"
+            }
+        }
+
+        result = generate_initial_diagnostic_node(
+            state,
+            db
+        )
+
+        assert "select a learning path" in result["response"].lower()
+        assert "assessment_questions" not in result
+
+
+def test_generate_initial_diagnostic_without_required_topics():
+    """
+    Test that no diagnostic quiz is generated
+    when the selected path has no prerequisite topics.
+    """
+
+    with SessionLocal() as db:
+        state = {
+            "selected_path": "python",
+            "learner_context": {
+                "current_level": "beginner"
+            }
+        }
+
+        result = generate_initial_diagnostic_node(
+            state,
+            db
+        )
+
+        assert result["diagnostic_topics"] == []
+        assert result["assessment_type"] == "diagnostic"
+        assert result["assessment_questions"] == []
+
+        assert (
+            "no prerequisite diagnostic assessment"
+            in result["response"].lower()
+        )
+
+def test_generate_initial_diagnostic_agentic_ai(monkeypatch):
+    """
+    Test that the Agentic AI path generates
+    a diagnostic quiz for its prerequisite topics.
+    """
+
+    fake_questions = [
+        {
+            "topic_id": 1,
+            "question": "What is a Python variable?",
+        },
+        {
+            "topic_id": 2,
+            "question": "What is supervised learning?",
+        },
+    ]
+
+    class FakeQuizTool:
+        def invoke(self, inputs):
+            # Verify that the diagnostic tool receives
+            # the correct assessment configuration.
+            assert inputs["assessment_type"] == "diagnostic"
+
+            assert inputs["topics"] == [
+                {
+                    "topic_id": 1,
+                    "topic": "Python Basics",
+                },
+                {
+                    "topic_id": 2,
+                    "topic": "Machine Learning Basics",
+                },
+            ]
+
+            return json.dumps(
+                {
+                    "questions": fake_questions
+                }
+            )
+
+    # Prevent the test from calling the real RAG pipeline.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name: f"Context for {topic_name}"
+    )
+
+    # Prevent the test from calling the real LLM.
+    monkeypatch.setattr(
+        "app.agent.graph.generate_quiz",
+        FakeQuizTool()
+    )
+
+    with SessionLocal() as db:
+        state = {
+            "selected_path": "agentic_ai",
+            "learner_context": {
+                "current_level": "beginner"
+            }
+        }
+
+        result = generate_initial_diagnostic_node(
+            state,
+            db
+        )
+
+    assert result["assessment_type"] == "diagnostic"
+
+    assert result["diagnostic_topics"] == [
+        {
+            "topic_id": 1,
+            "topic": "Python Basics",
+        },
+        {
+            "topic_id": 2,
+            "topic": "Machine Learning Basics",
+        },
+    ]
+
+    assert result["assessment_questions"] == fake_questions
+    assert result["response"] == (
+        "Your diagnostic assessment is ready."
+    )
+
+
+def test_submit_initial_diagnostic_node(monkeypatch):
+    """
+    Test that submitting the initial diagnostic:
+    1. Evaluates the learner's answers.
+    2. Saves the diagnostic assessment.
+    3. Creates the personalized learning path.
+    4. Selects the learner's first topic.
+    """
+
+    class FakeEvaluationTool:
+        def invoke(self, inputs):
+            return json.dumps(
+                {
+                    "is_correct": True,
+                    "score_awarded": 1,
+                    "feedback": "Correct.",
+                }
+            )
+
+    class FakeAttempt:
+        assessment_attempt_id = 10
+        score = 2
+        max_score = 2
+
+    # Prevent the test from calling the real LLM.
+    monkeypatch.setattr(
+        "app.agent.graph.evaluate_answer",
+        FakeEvaluationTool()
+    )
+
+    # Mock saving the diagnostic assessment.
+    def fake_save_assessment_result(
+        db,
+        user_id,
+        topic_id,
+        assessment_type,
+        questions,
+        feedback=None,
+    ):
+        assert user_id == 2
+        assert topic_id is None
+        assert assessment_type == "diagnostic"
+        assert len(questions) == 2
+
+        # Make sure the topic IDs are preserved
+        # for topic-level mastery calculation.
+        assert questions[0]["topic_id"] == 1
+        assert questions[1]["topic_id"] == 2
+
+        assert questions[0]["is_correct"] is True
+        assert questions[1]["is_correct"] is True
+
+        return FakeAttempt()
+
+    monkeypatch.setattr(
+        "app.agent.graph.save_assessment_result",
+        fake_save_assessment_result
+    )
+
+    # Mock personalized learning path creation.
+    def fake_create_learning_path(
+        db,
+        user_id,
+        target_topic_id,
+        path_name,
+        goal,
+    ):
+        assert user_id == 2
+        assert target_topic_id == 17
+        assert path_name == "Agentic AI Learning Path"
+        assert goal == "Learn Agentic AI"
+
+        return {
+            "learning_path_id": 5,
+            "user_id": 2,
+            "name": "Agentic AI Learning Path",
+            "goal": "Learn Agentic AI",
+            "status": "active",
+            "topic_ids": list(range(1, 18)),
+        }
+
+    monkeypatch.setattr(
+        "app.agent.graph.create_learning_path",
+        fake_create_learning_path
+    )
+
+    # Mock selection of the first topic
+    # that the learner still needs to study.
+    def fake_select_next_topic(
+        db,
+        learning_path_id,
+    ):
+        assert learning_path_id == 5
+
+        return {
+            "topic_id": 3,
+            "name": "Introduction to Agentic AI",
+            "status": "pending",
+            "recommended_action": "explain",
+        }
+
+    monkeypatch.setattr(
+        "app.agent.graph.select_next_topic",
+        fake_select_next_topic
+    )
+
+    state = {
+        "user_id": 2,
+        "selected_path": "agentic_ai",
+        "assessment_questions": [
+            {
+                "topic_id": 1,
+                "question_text": "What is a Python variable?",
+                "question_type": "multiple_choice",
+                "options": ["A", "B", "C", "D"],
+                "correct_answer": "A",
+            },
+            {
+                "topic_id": 2,
+                "question_text": "What is supervised learning?",
+                "question_type": "multiple_choice",
+                "options": ["A", "B", "C", "D"],
+                "correct_answer": "B",
+            },
+        ],
+        "assessment_answers": [
+            {
+                "learner_answer": "A",
+            },
+            {
+                "learner_answer": "B",
+            },
+        ],
+    }
+
+    with SessionLocal() as db:
+        result = submit_initial_diagnostic_node(
+            state,
+            db
+        )
+
+    assert result["assessment_result"] == {
+        "assessment_attempt_id": 10,
+        "score": 2,
+        "max_score": 2,
+    }
+
+    assert result["learning_path"]["learning_path_id"] == 5
+
+    assert result["current_topic"]["topic_id"] == 3
+    assert result["next_topic_id"] == 3
+
+    assert (
+        result["response"]
+        == "Your diagnostic assessment has been completed "
+           "and your personalized learning path is ready."
+    )
+
+
+def test_submit_initial_diagnostic_without_selected_path():
+    """
+    Test that the diagnostic cannot be submitted
+    without a selected learning path.
+    """
+
+    with SessionLocal() as db:
+        state = {
+            "user_id": 2,
+            "assessment_questions": [],
+            "assessment_answers": [],
+        }
+
+        result = submit_initial_diagnostic_node(
+            state,
+            db
+        )
+
+    assert "select a learning path" in result["response"].lower()
+
+
+def test_submit_initial_diagnostic_unconfigured_path():
+    """
+    Test that a learning path without a target topic
+    cannot create a personalized learning path yet.
+    """
+
+    with SessionLocal() as db:
+        state = {
+            "user_id": 2,
+            "selected_path": "machine_learning",
+        }
+
+        result = submit_initial_diagnostic_node(
+            state,
+            db
+        )
+
+    assert (
+        result["response"]
+        == "This learning path is not fully configured yet."
+    )
+
+
+def test_submit_initial_diagnostic_without_answers():
+    """
+    Test that diagnostic submission requires
+    both questions and learner answers.
+    """
+
+    with SessionLocal() as db:
+        state = {
+            "user_id": 2,
+            "selected_path": "agentic_ai",
+            "assessment_questions": [
+                {
+                    "topic_id": 1,
+                    "question_text": "What is a Python variable?",
+                    "correct_answer": "A",
+                }
+            ],
+            "assessment_answers": [],
+        }
+
+        result = submit_initial_diagnostic_node(
+            state,
+            db
+        )
+
+    assert (
+        "questions and answers are required"
+        in result["response"].lower()
+    )
+
+
+def test_submit_initial_diagnostic_incomplete_answers():
+    """
+    Test that every diagnostic question
+    must have a learner answer.
+    """
+
+    with SessionLocal() as db:
+        state = {
+            "user_id": 2,
+            "selected_path": "agentic_ai",
+            "assessment_questions": [
+                {
+                    "topic_id": 1,
+                    "question_text": "Question 1",
+                    "correct_answer": "A",
+                },
+                {
+                    "topic_id": 2,
+                    "question_text": "Question 2",
+                    "correct_answer": "B",
+                },
+            ],
+            "assessment_answers": [
+                {
+                    "learner_answer": "A",
+                }
+            ],
+        }
+
+        result = submit_initial_diagnostic_node(
+            state,
+            db
+        )
+
+    assert (
+        "answer all diagnostic questions"
+        in result["response"].lower()
+    )
+
+
+def test_route_initial_setup_to_normal_tutor():
+    """
+    Test that an existing learner without a newly
+    selected path continues to the normal tutor flow.
+    """
+
+    state = {
+        "user_id": 2,
+        "learner_context": {
+            "current_level": "beginner"
+        },
+    }
+
+    result = route_initial_setup(state)
+
+    assert result == "continue_tutor"
+
+
+def test_route_initial_setup_to_generate_diagnostic():
+    """
+    Test that selecting a new learning path
+    starts the initial diagnostic generation flow.
+    """
+
+    state = {
+        "user_id": 2,
+        "selected_path": "agentic_ai",
+    }
+
+    result = route_initial_setup(state)
+
+    assert result == "generate_initial_diagnostic"
+
+
+def test_route_initial_setup_to_submit_diagnostic():
+    """
+    Test that diagnostic questions and answers
+    route the learner to diagnostic submission.
+    """
+
+    state = {
+        "user_id": 2,
+        "selected_path": "agentic_ai",
+        "assessment_questions": [
+            {
+                "topic_id": 1,
+                "question_text": "What is a Python variable?",
+            }
+        ],
+        "assessment_answers": [
+            {
+                "learner_answer": "A",
+            }
+        ],
+    }
+
+    result = route_initial_setup(state)
+
+    assert result == "submit_initial_diagnostic"

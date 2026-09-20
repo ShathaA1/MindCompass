@@ -21,6 +21,13 @@ from app.database.models import (
     TopicMastery,
 )
 
+import pytest
+
+from app.services.learning_service import (
+    get_available_learning_path,
+    get_diagnostic_topics,
+)
+
 def test_get_active_learning_path():
     """
     Test that the learner's active learning path
@@ -1372,3 +1379,92 @@ def test_complete_learning_path():
             if learning_path is not None:
                 learning_path.status = original_status
                 db.commit()
+
+
+def test_get_available_learning_path():
+    """
+    Test that a valid learning path
+    returns the correct configuration.
+    """
+
+    result = get_available_learning_path("agentic_ai")
+
+    assert result["name"] == "Agentic AI"
+
+
+def test_get_available_learning_path_invalid():
+    """
+    Test that an unsupported learning path
+    raises a ValueError.
+    """
+
+    with pytest.raises(ValueError):
+        get_available_learning_path("data_science")
+
+
+
+def test_get_diagnostic_topics_agentic_ai():
+    """
+    Test that the Agentic AI path loads
+    both Python and Machine Learning prerequisites.
+    """
+
+    with SessionLocal() as db:
+        result = get_diagnostic_topics(
+            db,
+            "agentic_ai"
+        )
+
+        assert len(result) == 2
+
+        assert result[0]["topic_id"] == 1
+        assert result[0]["topic"] == "Python Basics"
+
+        assert result[1]["topic_id"] == 2
+        assert result[1]["topic"] == "Machine Learning Basics"
+
+
+def test_get_diagnostic_topics_machine_learning():
+    """
+    Test that the Machine Learning path loads
+    the Python prerequisite topic.
+    """
+
+    with SessionLocal() as db:
+        result = get_diagnostic_topics(
+            db,
+            "machine_learning"
+        )
+
+        assert len(result) == 1
+        assert result[0]["topic_id"] == 1
+        assert result[0]["topic"] == "Python Basics"
+
+
+def test_get_diagnostic_topics_python():
+    """
+    Test that the Python path currently has
+    no prerequisite diagnostic topics.
+    """
+
+    with SessionLocal() as db:
+        result = get_diagnostic_topics(
+            db,
+            "python"
+        )
+
+        assert result == []
+
+def test_agentic_ai_required_topics():
+    """
+    Test that the complete Agentic AI curriculum
+    is returned in prerequisite order.
+    """
+
+    with SessionLocal() as db:
+        topic_ids = get_required_topic_ids(
+            db,
+            17
+        )
+
+        assert topic_ids == list(range(1, 18))

@@ -3,12 +3,15 @@ from sqlalchemy.orm import Session
 from app.agent.state import TutorState
 from app.database.connection import SessionLocal
 from app.services.learner_service import get_learner_context
+from app.core.learning_paths import AVAILABLE_LEARNING_PATHS
 from app.services.learning_service import (
     get_active_learning_path,
     get_topic_mastery,
     select_next_topic,
     update_learning_path,
     complete_learning_path,
+    get_diagnostic_topics,
+    create_learning_path,
 )
 from langgraph.graph import StateGraph, START, END
 
@@ -243,6 +246,41 @@ def load_conversation_history_node(
         )
 
 
+
+def route_initial_setup(state: TutorState) -> str:
+    """
+    Decide whether the learner should enter
+    the initial diagnostic flow or continue
+    with the normal Tutor Agent workflow.
+    """
+
+    # A selected path indicates that the learner
+    # is currently setting up a new learning path.
+    selected_path = state.get("selected_path")
+
+    if not selected_path:
+        return "continue_tutor"
+
+    # If diagnostic questions and learner answers
+    # are present, process the submitted diagnostic.
+    assessment_questions = state.get(
+        "assessment_questions",
+        []
+    )
+
+    assessment_answers = state.get(
+        "assessment_answers",
+        []
+    )
+
+    if assessment_questions and assessment_answers:
+        return "submit_initial_diagnostic"
+
+    # Otherwise, generate the initial diagnostic
+    # for the selected learning path.
+    return "generate_initial_diagnostic"
+
+
 def build_tutor_graph():
     """
     Build and compile the Tutor Agent workflow.
@@ -257,6 +295,20 @@ def build_tutor_graph():
     workflow.add_node(
         "load_learner_context",
         load_learner_context_node
+    )
+
+        # Add the node that generates the initial
+    # diagnostic for a newly selected learning path.
+    workflow.add_node(
+        "generate_initial_diagnostic",
+        generate_initial_diagnostic_node
+    )
+
+    # Add the node that processes diagnostic answers
+    # and creates the personalized learning path.
+    workflow.add_node(
+        "submit_initial_diagnostic",
+        submit_initial_diagnostic_node
     )
 
     workflow.add_node(
@@ -364,9 +416,17 @@ def build_tutor_graph():
         "load_learner_context"
     )
 
-    workflow.add_edge(
+    # After loading the learner profile, decide
+    # whether to run initial path setup or
+    # continue with the normal Tutor Agent flow.
+    workflow.add_conditional_edges(
         "load_learner_context",
-        "load_conversation_history"
+        route_initial_setup,
+        {
+            "generate_initial_diagnostic": "generate_initial_diagnostic",
+            "submit_initial_diagnostic": "submit_initial_diagnostic",
+            "continue_tutor": "load_conversation_history",
+        }
     )
 
     workflow.add_edge(
@@ -465,6 +525,20 @@ def build_tutor_graph():
 
     workflow.add_edge(
         "recommend",
+        END
+    )
+
+        # End after generating the initial diagnostic.
+    # The workflow waits for the learner to submit answers.
+    workflow.add_edge(
+        "generate_initial_diagnostic",
+        END
+    )
+
+    # End after processing the diagnostic
+    # and creating the personalized learning path.
+    workflow.add_edge(
+        "submit_initial_diagnostic",
         END
     )
 
@@ -664,6 +738,259 @@ def retrieve_topic_context(
 
     return "\n\n".join(context_parts)
 
+def generate_initial_diagnostic_node(
+    state: TutorState,
+    db: Session
+) -> dict:
+    """
+    Generate the initial diagnostic assessment
+    for the learner's selected learning path.
+    """
+
+    # Get the learning path selected by the learner.
+    selected_path = state.get("selected_path")
+
+    # A learning path must be selected before
+    # generating the diagnostic assessment.
+    if not selected_path:
+        return {
+            "response": (
+                "Please select a learning path "
+                "before starting the diagnostic assessment."
+            )
+        }
+
+    # Load the prerequisite topics that should
+    # be assessed for the selected learning path.
+    diagnostic_topics = get_diagnostic_topics(
+        db,
+        selected_path
+    )
+
+    # Some learning paths may not currently require
+    # a prerequisite diagnostic assessment.
+    if not diagnostic_topics:
+        return {
+            "diagnostic_topics": [],
+            "assessment_type": "diagnostic",
+            "assessment_questions": [],
+            "response": (
+                "No prerequisite diagnostic assessment "
+                "is required for this learning path."
+            ),
+        }
+
+    # Load the learner's current level.
+    learner_context = state.get(
+        "learner_context",
+        {}
+    )
+
+    student_level = (
+        learner_context.get("current_level")
+        or learner_context.get("initial_level")
+        or "beginner"
+    )
+
+    # Build RAG context for all topics included
+    # in the diagnostic assessment.
+    context_parts = []
+
+    for topic in diagnostic_topics:
+        topic_context = retrieve_topic_context(
+            topic_id=topic["topic_id"],
+            topic_name=topic["topic"]
+        )
+
+        if topic_context:
+            context_parts.append(topic_context)
+
+    context = "\n\n".join(context_parts)
+
+    # Generate one diagnostic quiz covering
+    # all required prerequisite topics.
+    quiz_json = generate_quiz.invoke(
+        {
+            "topics": diagnostic_topics,
+            "context": context,
+            "student_level": student_level,
+            "num_questions": 5,
+            "assessment_type": "diagnostic",
+        }
+    )
+
+    # Convert the tool output from JSON text
+    # into Python data.
+    quiz = json.loads(quiz_json)
+
+    return {
+        "diagnostic_topics": diagnostic_topics,
+        "assessment_type": "diagnostic",
+        "assessment_questions": quiz["questions"],
+        "response": (
+            "Your diagnostic assessment is ready."
+        ),
+    }
+
+
+
+def submit_initial_diagnostic_node(
+    state: TutorState,
+    db: Session
+) -> dict:
+    """
+    Evaluate the learner's diagnostic answers,
+    save topic-level mastery, create the personalized
+    learning path, and select the first topic to study.
+    """
+
+    # Get the learning path selected by the learner.
+    selected_path = state.get("selected_path")
+
+    if not selected_path:
+        return {
+            "response": (
+                "Please select a learning path "
+                "before submitting the diagnostic assessment."
+            )
+        }
+
+    # Load and validate the selected path configuration.
+    path_config = AVAILABLE_LEARNING_PATHS.get(
+        selected_path
+    )
+
+    if not path_config:
+        return {
+            "response": (
+                "The selected learning path is not supported."
+            )
+        }
+
+    # A target topic is required to create
+    # the personalized learning path.
+    target_topic_id = path_config.get(
+        "target_topic_id"
+    )
+
+    if target_topic_id is None:
+        return {
+            "response": (
+                "This learning path is not fully configured yet."
+            )
+        }
+
+    # Load the diagnostic questions and
+    # the learner's submitted answers.
+    questions = state.get(
+        "assessment_questions",
+        []
+    )
+
+    answers = state.get(
+        "assessment_answers",
+        []
+    )
+
+    if not questions or not answers:
+        return {
+            "response": (
+                "Diagnostic questions and answers "
+                "are required before submission."
+            )
+        }
+
+    # Make sure every diagnostic question
+    # has a corresponding learner answer.
+    if len(questions) != len(answers):
+        return {
+            "response": (
+                "Please answer all diagnostic questions "
+                "before submitting the assessment."
+            )
+        }
+
+    # Evaluate every learner answer.
+    evaluated_questions = []
+
+    for question, answer in zip(
+        questions,
+        answers
+    ):
+        evaluation_json = evaluate_answer.invoke(
+            {
+                "question": question["question_text"],
+                "correct_answer": question["correct_answer"],
+                "learner_answer": answer["learner_answer"],
+            }
+        )
+
+        evaluation = json.loads(
+            evaluation_json
+        )
+
+        # Keep the original question data and add
+        # the learner's answer and evaluation result.
+        evaluated_questions.append(
+            {
+                **question,
+                "learner_answer": answer["learner_answer"],
+                "is_correct": evaluation["is_correct"],
+                "score_awarded": evaluation["score_awarded"],
+                "feedback": evaluation["feedback"],
+            }
+        )
+
+    # Save one multi-topic diagnostic attempt.
+    # topic_id is None because the diagnostic
+    # can contain questions from multiple topics.
+    attempt = save_assessment_result(
+        db=db,
+        user_id=state["user_id"],
+        topic_id=None,
+        assessment_type="diagnostic",
+        questions=evaluated_questions,
+    )
+
+    # The assessment service has now updated
+    # TopicMastery for every assessed topic.
+    # Create the personalized learning path using
+    # those updated mastery scores.
+    learning_path = create_learning_path(
+        db=db,
+        user_id=state["user_id"],
+        target_topic_id=target_topic_id,
+        path_name=f'{path_config["name"]} Learning Path',
+        goal=f'Learn {path_config["name"]}',
+    )
+
+    # Select the first incomplete topic whose
+    # prerequisites have already been completed.
+    next_topic = select_next_topic(
+        db=db,
+        learning_path_id=learning_path["learning_path_id"],
+    )
+
+    return {
+        "assessment_result": {
+            "assessment_attempt_id": (
+                attempt.assessment_attempt_id
+            ),
+            "score": attempt.score,
+            "max_score": attempt.max_score,
+        },
+        "learning_path": learning_path,
+        "current_topic": next_topic,
+        "next_topic_id": (
+            next_topic["topic_id"]
+            if next_topic
+            else None
+        ),
+        "response": (
+            "Your diagnostic assessment has been completed "
+            "and your personalized learning path is ready."
+        ),
+    }
 
 def generate_assessment_node(
     state: TutorState
