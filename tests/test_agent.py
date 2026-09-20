@@ -26,6 +26,8 @@ from app.database.models import (
     ChatMessage,
 )
 
+from app.agent.recommendation import build_recommendation
+
 def test_load_learner_context():
     """
     Test that the agent node loads learner data
@@ -1474,3 +1476,177 @@ def test_recommend_node_selects_next_topic():
             )
 
             db.commit()
+
+
+def test_build_recommendation_without_assessment():
+    """
+    The learner should receive an explanation recommendation
+    when no assessment result is available.
+    """
+
+    result = build_recommendation(
+        mastery_score=None
+    )
+
+    assert result["recommended_action"] == "explain"
+    assert "No assessment result" in result["recommendation_reason"]
+
+
+def test_build_recommendation_low_mastery():
+    """
+    Low mastery should recommend additional explanation.
+    """
+
+    result = build_recommendation(
+        mastery_score=30
+    )
+
+    assert result["recommended_action"] == "explain"
+    assert "30%" in result["recommendation_reason"]
+
+
+def test_build_recommendation_moderate_mastery():
+    """
+    Moderate mastery should recommend practice.
+    """
+
+    result = build_recommendation(
+        mastery_score=55
+    )
+
+    assert result["recommended_action"] == "practice"
+    assert "55%" in result["recommendation_reason"]
+
+
+def test_build_recommendation_good_mastery():
+    """
+    Good mastery should recommend review.
+    """
+
+    result = build_recommendation(
+        mastery_score=75
+    )
+
+    assert result["recommended_action"] == "review"
+    assert "75%" in result["recommendation_reason"]
+
+
+def test_build_recommendation_high_mastery():
+    """
+    High mastery without weak areas should allow
+    the learner to progress.
+    """
+
+    result = build_recommendation(
+        mastery_score=90
+    )
+
+    assert result["recommended_action"] == "recommend"
+    assert "ready for the next learning step" in (
+        result["recommendation_reason"]
+    )
+
+
+def test_build_recommendation_high_mastery_with_weak_areas():
+    """
+    High mastery should still allow progression when minor
+    weak areas remain, while mentioning them in the reason.
+    """
+
+    result = build_recommendation(
+        mastery_score=90,
+        weak_areas=["tool error handling"]
+    )
+
+    assert result["recommended_action"] == "recommend"
+    assert "weak areas" in result["recommendation_reason"]
+
+
+
+
+def test_recommend_node_builds_personalized_response(monkeypatch):
+    """
+    The recommendation node should select the next eligible
+    topic and include the recommendation reason and learner goal.
+    """
+
+    # Mock the next eligible topic so the test does not
+    # depend on real database learning path data.
+    next_topic = {
+        "topic_id": 4,
+        "name": "Building Your First Agent",
+        "description": "Introduction to building AI agents.",
+        "difficulty_level": "intermediate",
+        "position": 4,
+        "status": "pending",
+        "recommended_action": "explain",
+    }
+
+    monkeypatch.setattr(
+        "app.agent.graph.select_next_topic",
+        lambda db, learning_path_id: next_topic
+    )
+
+    state = {
+        "user_id": 2,
+        "learning_path": {
+            "learning_path_id": 1,
+            "goal": "Learn Agentic AI",
+            "status": "active",
+        },
+        "learner_context": {
+            "goal": "Learn Agentic AI",
+        },
+        "recommendation_reason": (
+            "Mastery is 90%. The learner has demonstrated "
+            "strong mastery and is ready for the next learning step."
+        ),
+    }
+
+    result = recommend_node(state)
+
+    assert result["next_topic_id"] == 4
+    assert result["current_topic"] == next_topic
+
+    assert "Building Your First Agent" in result["response"]
+    assert "Mastery is 90%" in result["response"]
+    assert "Learn Agentic AI" in result["response"]
+
+
+def test_recommend_node_completes_path_when_no_topic_remains(
+    monkeypatch
+):
+    """
+    The recommendation node should complete the learning path
+    when no eligible incomplete topics remain.
+    """
+
+    # Simulate a learning path with no remaining topics.
+    monkeypatch.setattr(
+        "app.agent.graph.select_next_topic",
+        lambda db, learning_path_id: {}
+    )
+
+    # Mock path completion so the test does not
+    # modify the real database.
+    monkeypatch.setattr(
+        "app.agent.graph.complete_learning_path",
+        lambda db, learning_path_id: {
+            "learning_path_id": learning_path_id,
+            "status": "completed",
+        }
+    )
+
+    state = {
+        "user_id": 2,
+        "learning_path": {
+            "learning_path_id": 1,
+            "goal": "Learn Agentic AI",
+            "status": "active",
+        },
+    }
+
+    result = recommend_node(state)
+
+    assert result["learning_path"]["status"] == "completed"
+    assert "completed all topics" in result["response"]

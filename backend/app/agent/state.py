@@ -19,6 +19,7 @@ class TutorState(TypedDict, total=False):
     # Agent decision
     learner_need: str
     recommended_action: str
+    recommendation_reason: str
     next_topic_id: int
 
     # Final result from other nodes/tools

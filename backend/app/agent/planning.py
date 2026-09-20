@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 
 from app.agent.state import TutorState
 from app.services.learning_service import select_next_topic
-
+from app.agent.recommendation import build_recommendation
 
 def determine_learner_need(
     state: TutorState
@@ -180,8 +180,8 @@ def recommend_next_action(
     state: TutorState
 ) -> dict:
     """
-    Recommend the learner's next action
-    based on the latest assessment mastery score.
+    Recommend the learner's next action and explain
+    the reason behind the recommendation.
     """
 
     # Get the learner's mastery information
@@ -191,48 +191,32 @@ def recommend_next_action(
         {}
     )
 
-    # If the learner has not completed an assessment
-    # for this topic yet, start with an explanation.
-    if not topic_mastery:
-        return {
-            "recommended_action": "explain"
-        }
-
-    # Mastery score represents the learner's
-    # latest assessment result for this topic.
-    mastery_score = topic_mastery.get(
-        "mastery_score",
-        0
+    # Use None when the learner has not completed
+    # an assessment for the current topic.
+    mastery_score = (
+        topic_mastery.get("mastery_score")
+        if topic_mastery
+        else None
     )
 
-    # Very low mastery indicates that the learner
-    # needs the concept explained again.
-    if mastery_score < 40:
-        return {
-            "recommended_action": "explain"
-        }
+    # Load the learner's identified weak areas.
+    # An empty list is used when no weak areas exist.
+    weak_areas = (
+        topic_mastery.get("weak_areas") or []
+        if topic_mastery
+        else []
+    )
 
-    # Moderate mastery indicates that the learner
-    # understands the basics but needs more practice.
-    if mastery_score < 70:
-        return {
-            "recommended_action": "practice"
-        }
+    # Build a detailed recommendation using
+    # mastery and the learner's weak areas.
+    recommendation = build_recommendation(
+        mastery_score=mastery_score,
+        weak_areas=weak_areas
+    )
 
-    # Good mastery indicates that the learner
-    # should review remaining weak areas.
-    if mastery_score < 85:
-        return {
-            "recommended_action": "review"
-        }
-
-    # A mastery score of 85 or higher means
-    # the topic is completed, so the agent should
-    # determine the learner's next step.
-    return {
-        "recommended_action": "recommend"
-    }
-
+    # Store both the action and its reason
+    # in the shared TutorState.
+    return recommendation
 
 
 def resolve_action(

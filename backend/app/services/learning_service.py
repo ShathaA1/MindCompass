@@ -8,6 +8,8 @@ from app.database.models import (
     TopicMastery,
 )
 
+from app.agent.recommendation import determine_recommended_action
+
 
 def get_active_learning_path(
     db: Session,
@@ -300,13 +302,6 @@ def create_learning_path(
         required_topic_ids,
         start=1
     ):
-        # Determine whether the learner already
-        # mastered this topic before creating the path.
-        initial_status = get_initial_topic_status(
-            db=db,
-            user_id=user_id,
-            topic_id=topic_id
-        )
 
         # Determine the learner's initial topic status
         # based on the latest assessment result.
@@ -523,7 +518,7 @@ def get_topic_recommended_action(
 ) -> str:
     """
     Determine the recommended learning action
-    based on the learner's latest assessment score.
+    using the shared recommendation rules.
     """
 
     # Get the learner's latest mastery information
@@ -534,31 +529,16 @@ def get_topic_recommended_action(
         topic_id=topic_id
     )
 
-    # If the learner has not completed an assessment
-    # yet, start by explaining the topic.
-    if not topic_mastery:
-        return "explain"
-
-    # Mastery score represents the result
-    # of the learner's latest assessment.
-    mastery_score = topic_mastery.get(
-        "mastery_score",
-        0
+    # Use None when the learner has not completed
+    # an assessment for this topic yet.
+    mastery_score = (
+        topic_mastery.get("mastery_score")
+        if topic_mastery
+        else None
     )
 
-    # Very low mastery requires explanation.
-    if mastery_score < 40:
-        return "explain"
-
-    # Moderate mastery requires more practice.
-    if mastery_score < 70:
-        return "practice"
-
-    # Good mastery requires targeted review
-    # of the learner's remaining weak areas.
-    if mastery_score < 85:
-        return "review"
-
-    # High mastery means the topic is completed,
-    # so the agent should determine the next step.
-    return "recommend"
+    # Apply the shared recommendation rules
+    # used across the Tutor Agent.
+    return determine_recommended_action(
+        mastery_score=mastery_score
+    )

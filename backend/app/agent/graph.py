@@ -476,8 +476,9 @@ def recommend_node(
     state: TutorState
 ) -> dict:
     """
-    Recommend the learner's next topic
-    after completing the current topic.
+    Recommend the learner's next topic after completing
+    the current topic and provide a personalized reason
+    for the recommendation.
     """
 
     # Get the active learning path
@@ -485,6 +486,20 @@ def recommend_node(
     learning_path = state.get(
         "learning_path",
         {}
+    )
+
+    # Get learner information that can help
+    # personalize the recommendation.
+    learner_context = state.get(
+        "learner_context",
+        {}
+    )
+
+    # Get the recommendation reason produced
+    # from the learner's latest mastery data.
+    recommendation_reason = state.get(
+        "recommendation_reason",
+        ""
     )
 
     # Read the active learning path ID.
@@ -505,8 +520,8 @@ def recommend_node(
     # the learner's next available topic.
     with SessionLocal() as db:
 
-        # Select the next incomplete topic
-        # whose prerequisites are completed.
+        # Select the next incomplete topic whose
+        # prerequisites have already been completed.
         next_topic = select_next_topic(
             db=db,
             learning_path_id=learning_path_id
@@ -538,16 +553,36 @@ def recommend_node(
                 ),
             }
 
-    # Store the newly selected topic in TutorState
-    # and provide a recommendation response.
+    # Get the learner's goal when available.
+    learner_goal = learner_context.get("goal")
+
+    # Build a personalized recommendation response.
+    response_parts = [
+        f"Your next recommended topic is {next_topic['name']}."
+    ]
+
+    # Include the reasoning behind the progression
+    # decision when it is available.
+    if recommendation_reason:
+        response_parts.append(
+            recommendation_reason
+        )
+
+    # Connect the recommendation to the learner's
+    # broader learning goal when one is available.
+    if learner_goal:
+        response_parts.append(
+            f"This topic supports your learning goal: "
+            f"{learner_goal}."
+        )
+
     return {
         "current_topic": next_topic,
         "next_topic_id": next_topic["topic_id"],
-        "response": (
-            f"Your next recommended topic is "
-            f"{next_topic['name']}."
-        ),
+        "response": " ".join(response_parts),
     }
+
+
 
 def update_learning_path_node(
     state: TutorState
