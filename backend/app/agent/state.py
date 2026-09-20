@@ -22,5 +22,9 @@ class TutorState(TypedDict, total=False):
     recommendation_reason: str
     next_topic_id: int
 
+    # Assessment state
+    assessment_type: str
+    assessment_questions: list[dict[str, Any]]
+
     # Final result from other nodes/tools
     response: str

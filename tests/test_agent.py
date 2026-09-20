@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 from app.database.connection import SessionLocal
 from app.agent.graph import (
     load_learner_context,
@@ -8,6 +9,12 @@ from app.agent.graph import (
     update_learning_path_node,
     recommend_node,
     load_conversation_history,
+    prepare_assessment_inputs,
+    generate_assessment_node,
+    prepare_assessment_responses,
+    evaluate_assessment_responses,
+    submit_assessment_node,
+    route_assessment,
 )
 from app.agent.planning import (
     determine_learner_need,
@@ -1650,3 +1657,479 @@ def test_recommend_node_completes_path_when_no_topic_remains(
 
     assert result["learning_path"]["status"] == "completed"
     assert "completed all topics" in result["response"]
+
+
+
+def test_prepare_assessment_inputs():
+    """
+    Assessment inputs should be prepared from
+    the current topic and learner context.
+    """
+
+    state = {
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "initial_level": "beginner",
+            "current_level": "intermediate",
+        },
+        "assessment_type": "topic",
+    }
+
+    result = prepare_assessment_inputs(state)
+
+    assert result["topics"] == [
+        {
+            "topic_id": 12,
+            "topic": "Building Your First Agent",
+        }
+    ]
+
+    assert result["student_level"] == "intermediate"
+    assert result["assessment_type"] == "topic"
+
+
+def test_prepare_assessment_inputs_without_topic():
+    """
+    Assessment preparation should stop safely
+    when no current topic is available.
+    """
+
+    state = {
+        "current_topic": {},
+        "learner_context": {
+            "current_level": "intermediate",
+        },
+    }
+
+    result = prepare_assessment_inputs(state)
+
+    assert result == {}
+
+
+def test_generate_assessment_node_generates_quiz(monkeypatch):
+    """
+    The assessment node should retrieve learning context,
+    generate a quiz, and store the generated questions
+    in TutorState.
+    """
+
+    # Mock the RAG retrieval step so the test
+    # does not require embeddings or an API call.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_assessment_context",
+        lambda topic_id, topic_name: (
+            "AI agents can reason, use tools, "
+            "and perform actions to achieve goals."
+        )
+    )
+
+    # Create a fake quiz response matching the
+    # structure returned by the quiz generation tool.
+    fake_quiz = {
+        "questions": [
+            {
+                "topic_id": 12,
+                "question_text": "What is an AI agent?",
+                "question_type": "multiple_choice",
+                "difficulty": "intermediate",
+                "options": [
+                    "A",
+                    "B",
+                    "C",
+                    "D",
+                ],
+                "correct_answer": "A",
+            }
+        ]
+    }
+
+    # Mock the quiz tool so no LLM API
+    # call is made during the test.
+    class FakeQuizTool:
+        """
+        Fake quiz tool used to avoid calling
+        the real LLM during testing.
+        """
+
+        def invoke(self, inputs):
+            return json.dumps(fake_quiz)
+
+
+    monkeypatch.setattr(
+        "app.agent.graph.generate_quiz",
+        FakeQuizTool()
+    )
+
+    state = {
+        "user_id": 2,
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "current_level": "intermediate",
+        },
+        "assessment_type": "topic",
+    }
+
+    result = generate_assessment_node(state)
+
+    assert result["assessment_type"] == "topic"
+    assert len(result["assessment_questions"]) == 1
+    assert (
+        result["assessment_questions"][0]["topic_id"]
+        == 12
+    )
+    assert "questions" in result["response"]
+
+
+def test_generate_assessment_node_stops_without_rag_context(
+    monkeypatch
+):
+    """
+    The assessment node should stop safely when
+    no learning context is available from RAG.
+    """
+
+    # Simulate a RAG retrieval result
+    # with no available learning material.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_assessment_context",
+        lambda topic_id, topic_name: ""
+    )
+
+    state = {
+        "user_id": 2,
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "current_level": "intermediate",
+        },
+        "assessment_type": "topic",
+    }
+
+    result = generate_assessment_node(state)
+
+    assert result.get("assessment_questions") is None
+    assert "no learning context" in result["response"]
+
+
+def test_prepare_assessment_responses():
+    """
+    Generated questions should be combined with
+    the learner's submitted answers.
+    """
+
+    state = {
+        "assessment_questions": [
+            {
+                "topic_id": 12,
+                "question_text": "What is an AI agent?",
+                "question_type": "multiple_choice",
+                "options": ["A", "B", "C", "D"],
+                "correct_answer": "A",
+            }
+        ],
+        "assessment_answers": [
+            {
+                "learner_answer": "A",
+            }
+        ],
+    }
+
+    result = prepare_assessment_responses(state)
+
+    assert len(result) == 1
+    assert result[0]["topic_id"] == 12
+    assert result[0]["learner_answer"] == "A"
+    assert result[0]["correct_answer"] == "A"
+
+
+def test_prepare_assessment_responses_missing_answers():
+    """
+    Assessment response preparation should stop safely
+    when learner answers are missing.
+    """
+
+    state = {
+        "assessment_questions": [
+            {
+                "topic_id": 12,
+                "question_text": "What is an AI agent?",
+                "correct_answer": "A",
+            }
+        ],
+        "assessment_answers": [],
+    }
+
+    result = prepare_assessment_responses(state)
+
+    assert result == []
+
+
+def test_evaluate_assessment_responses(
+    monkeypatch
+):
+    """
+    Assessment responses should be evaluated
+    without calling the real LLM during testing.
+    """
+
+    responses = [
+        {
+            "topic_id": 12,
+            "question_text": "What is an AI agent?",
+            "question_type": "multiple_choice",
+            "options": ["A", "B", "C", "D"],
+            "correct_answer": "A",
+            "learner_answer": "A",
+        }
+    ]
+
+    fake_evaluation = {
+        "is_correct": True,
+        "score_awarded": 1,
+        "feedback": "Correct answer.",
+    }
+
+    class FakeEvaluationTool:
+        """
+        Fake evaluation tool used to avoid
+        calling the real LLM during testing.
+        """
+
+        def invoke(self, inputs):
+            return json.dumps(
+                fake_evaluation
+            )
+
+    monkeypatch.setattr(
+        "app.agent.graph.evaluate_answer",
+        FakeEvaluationTool()
+    )
+
+    result = evaluate_assessment_responses(
+        responses
+    )
+
+    assert len(result) == 1
+    assert result[0]["is_correct"] is True
+    assert result[0]["score_awarded"] == 1
+    assert result[0]["feedback"] == "Correct answer."
+    assert result[0]["learner_answer"] == "A"
+
+
+def test_evaluate_assessment_responses_empty():
+    """
+    Assessment evaluation should stop safely
+    when no responses are available.
+    """
+
+    result = evaluate_assessment_responses([])
+
+    assert result == []
+
+
+def test_submit_assessment_node(monkeypatch):
+    """
+    The assessment submission node should evaluate
+    learner responses, save the result, reload the
+    updated topic mastery, and return the completed
+    assessment result.
+    """
+
+    state = {
+        "user_id": 2,
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "assessment_type": "topic",
+        "assessment_questions": [
+            {
+                "topic_id": 12,
+                "question_text": "What is an AI agent?",
+                "question_type": "multiple_choice",
+                "options": ["A", "B", "C", "D"],
+                "correct_answer": "A",
+            }
+        ],
+        "assessment_answers": [
+            {
+                "learner_answer": "A",
+            }
+        ],
+    }
+
+    # Mock the evaluation step so the test
+    # does not call the real LLM.
+    evaluated_responses = [
+        {
+            "topic_id": 12,
+            "question_text": "What is an AI agent?",
+            "question_type": "multiple_choice",
+            "options": ["A", "B", "C", "D"],
+            "correct_answer": "A",
+            "learner_answer": "A",
+            "is_correct": True,
+            "score_awarded": 1,
+            "feedback": "Correct answer.",
+        }
+    ]
+
+    monkeypatch.setattr(
+        "app.agent.graph.evaluate_assessment_responses",
+        lambda responses: evaluated_responses
+    )
+
+    # Create a fake assessment attempt matching
+    # the fields returned by the database service.
+    class FakeAssessmentAttempt:
+        assessment_attempt_id = 100
+        score = 1
+        max_score = 1
+
+    # Mock database persistence so this test
+    # does not modify PostgreSQL.
+    monkeypatch.setattr(
+        "app.agent.graph.save_assessment_result",
+        lambda db, user_id, topic_id,
+        assessment_type, questions: FakeAssessmentAttempt()
+    )
+
+    # Mock the updated mastery that would normally
+    # be loaded from PostgreSQL after submission.
+    updated_mastery = {
+        "mastery_score": 100.0,
+        "weak_areas": [],
+        "last_assessed_at": None,
+    }
+
+    monkeypatch.setattr(
+        "app.agent.graph.get_topic_mastery",
+        lambda db, user_id, topic_id: updated_mastery
+    )
+
+    # Run the assessment submission node.
+    result = submit_assessment_node(state)
+
+    # Verify the saved assessment result.
+    assert result["assessment_result"] == {
+        "assessment_attempt_id": 100,
+        "score": 1,
+        "max_score": 1,
+    }
+
+    # Verify that the updated topic mastery
+    # is returned to TutorState.
+    assert result["topic_mastery"] == updated_mastery
+    assert (
+        result["topic_mastery"]["mastery_score"]
+        == 100.0
+    )
+
+    # Verify the final response shown
+    # after assessment submission.
+    assert "Assessment completed" in result["response"]
+    assert "1/1" in result["response"]
+
+
+
+def test_submit_assessment_node_incomplete_answers():
+    """
+    Assessment submission should stop safely
+    when learner answers are incomplete.
+    """
+
+    state = {
+        "user_id": 2,
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "assessment_type": "topic",
+        "assessment_questions": [
+            {
+                "topic_id": 12,
+                "question_text": "What is an AI agent?",
+                "correct_answer": "A",
+            }
+        ],
+        "assessment_answers": [],
+    }
+
+    result = submit_assessment_node(state)
+
+    assert result.get("assessment_result") is None
+    assert "answers are incomplete" in result["response"]
+
+
+def test_route_assessment_to_generate():
+    """
+    Assessment routing should generate a new quiz
+    when no existing assessment answers are available.
+    """
+
+    state = {
+        "assessment_questions": [],
+        "assessment_answers": [],
+    }
+
+    result = route_assessment(state)
+
+    assert result == "generate_assessment"
+
+
+def test_route_assessment_to_submit():
+    """
+    Assessment routing should submit the assessment
+    when questions and learner answers are available.
+    """
+
+    state = {
+        "assessment_questions": [
+            {
+                "topic_id": 12,
+                "question_text": "What is an AI agent?",
+                "correct_answer": "A",
+            }
+        ],
+        "assessment_answers": [
+            {
+                "learner_answer": "A",
+            }
+        ],
+    }
+
+    result = route_assessment(state)
+
+    assert result == "submit_assessment"
+
+
+def test_graph_routes_assessment_to_generate(monkeypatch):
+    """
+    The Tutor Agent graph should route to assessment
+    generation when the learner requests an assessment
+    and no submitted answers are available.
+    """
+
+    # Mock the assessment generation node so the test
+    # focuses only on graph routing behavior.
+    monkeypatch.setattr(
+        "app.agent.graph.generate_assessment_node",
+        lambda state: {
+            "assessment_questions": [
+                {
+                    "topic_id": 12,
+                    "question_text": "What is an AI agent?",
+                    "correct_answer": "A",
+                }
+            ],
+            "response": "Assessment generated.",
+        }
+    )
