@@ -30,6 +30,9 @@ import json
 
 from app.tools.quiz_generation import generate_quiz
 from app.tools.answer_evaluation import evaluate_answer
+from app.tools.explain import explain
+from app.tools.practice_generation import generate_practice
+
 from app.rag.retrieval import retrieve
 
 
@@ -470,18 +473,99 @@ def build_tutor_graph():
 
 
 
-
-def teach_node(state: TutorState) -> dict:
+def prepare_teaching_inputs(
+    state: TutorState
+) -> dict:
     """
-    Placeholder node for the teaching workflow.
+    Prepare the learner and topic information required
+    for generating a personalized explanation.
     """
 
-    # Return a temporary response until the
-    # real teaching logic is integrated.
+    # Load the learner's current topic and context.
+    current_topic = state.get(
+        "current_topic",
+        {}
+    )
+    learner_context = state.get(
+        "learner_context",
+        {}
+    )
+
+    # Teaching requires an active topic.
+    if not current_topic:
+        return {}
+
+    topic_id = current_topic.get("topic_id")
+    topic_name = current_topic.get("name")
+
+    # Stop safely if the topic information
+    # is incomplete.
+    if not topic_id or not topic_name:
+        return {}
+
+    # Prefer the learner's current assessed level.
+    # Fall back to the initial self-reported level.
+    student_level = (
+        learner_context.get("current_level")
+        or learner_context.get("initial_level")
+        or "beginner"
+    )
+
     return {
-        "response": "Teaching action selected."
+        "topic_id": topic_id,
+        "topic_name": topic_name,
+        "student_level": student_level,
     }
 
+def teach_node(
+    state: TutorState
+) -> dict:
+    """
+    Generate a personalized teaching response using
+    the learner's current topic and retrieved context.
+    """
+
+    # Prepare the learner and topic information
+    # required for the teaching workflow.
+    teaching_inputs = prepare_teaching_inputs(state)
+
+    if not teaching_inputs:
+        return {
+            "response": (
+                "An explanation could not be generated "
+                "because no current topic is available."
+            )
+        }
+
+    # Retrieve relevant learning material from
+    # the RAG knowledge base for the current topic.
+    context = retrieve_topic_context(
+        topic_id=teaching_inputs["topic_id"],
+        topic_name=teaching_inputs["topic_name"]
+    )
+
+    if not context:
+        return {
+            "response": (
+                "An explanation could not be generated "
+                "because no learning context was found "
+                "for the current topic."
+            )
+        }
+
+    # The explanation tool will be integrated
+    # in the next step.
+    # Generate a personalized explanation using
+    # the retrieved topic context and learner level.
+    explanation = explain.invoke({
+        "topic": teaching_inputs["topic_name"],
+        "context": context,
+        "student_level": teaching_inputs["student_level"],
+    })
+
+    return {
+        "response": explanation
+    }
 
 
 def prepare_assessment_inputs(
@@ -548,7 +632,7 @@ def prepare_assessment_inputs(
     }
 
 
-def retrieve_assessment_context(
+def retrieve_topic_context(
     topic_id: int,
     topic_name: str
 ) -> str:
@@ -617,7 +701,7 @@ def generate_assessment_node(
 
     # Retrieve relevant course material for
     # the current topic.
-    context = retrieve_assessment_context(
+    context = retrieve_topic_context(
         topic_id=topic_id,
         topic_name=topic_name
     )
@@ -918,28 +1002,237 @@ def route_assessment(
     return "generate_assessment"
 
 
-
-def practice_node(state: TutorState) -> dict:
+def prepare_practice_inputs(
+    state: TutorState
+) -> dict:
     """
-    Placeholder node for the practice workflow.
+    Prepare the learner, topic, and mastery information
+    required for generating personalized practice.
     """
 
-    # Return a temporary response until the
-    # real practice logic is integrated.
+    # Load the learner's current topic and context.
+    current_topic = state.get(
+        "current_topic",
+        {}
+    )
+    learner_context = state.get(
+        "learner_context",
+        {}
+    )
+    topic_mastery = state.get(
+        "topic_mastery",
+        {}
+    )
+
+    # Practice requires an active topic.
+    if not current_topic:
+        return {}
+
+    topic_id = current_topic.get("topic_id")
+    topic_name = current_topic.get("name")
+
+    # Stop safely if the topic information
+    # is incomplete.
+    if not topic_id or not topic_name:
+        return {}
+
+    # Prefer the learner's current assessed level.
+    # Fall back to the initial self-reported level.
+    student_level = (
+        learner_context.get("current_level")
+        or learner_context.get("initial_level")
+        or "beginner"
+    )
+
+    # Use detected weak areas to personalize
+    # the generated practice activities.
+    weak_areas = topic_mastery.get(
+        "weak_areas",
+        []
+    )
+
     return {
-        "response": "Practice action selected."
+        "topic_id": topic_id,
+        "topic_name": topic_name,
+        "student_level": student_level,
+        "weak_areas": weak_areas,
     }
 
 
-def review_node(state: TutorState) -> dict:
+def practice_node(
+    state: TutorState
+) -> dict:
     """
-    Placeholder node for the review workflow.
+    Generate personalized practice using the learner's
+    current topic, mastery information, and retrieved context.
     """
 
-    # Return a temporary response until the
-    # real review logic is integrated.
+    # Prepare the learner, topic, and mastery information
+    # required for the practice workflow.
+    practice_inputs = prepare_practice_inputs(state)
+
+    if not practice_inputs:
+        return {
+            "response": (
+                "Practice could not be generated "
+                "because no current topic is available."
+            )
+        }
+
+    # Retrieve relevant learning material from
+    # the RAG knowledge base for the current topic.
+    context = retrieve_topic_context(
+        topic_id=practice_inputs["topic_id"],
+        topic_name=practice_inputs["topic_name"]
+    )
+
+    if not context:
+        return {
+            "response": (
+                "Practice could not be generated "
+                "because no learning context was found "
+                "for the current topic."
+            )
+        }
+
+    # Generate personalized practice using the retrieved
+    # topic context, learner level, and detected weak areas.
+    practice = generate_practice.invoke({
+        "topic": practice_inputs["topic_name"],
+        "context": context,
+        "student_level": practice_inputs["student_level"],
+        "practice_type": "flashcards",
+        "num_items": 5,
+        "weak_areas": json.dumps(
+            practice_inputs["weak_areas"]
+        ),
+    })
+
     return {
-        "response": "Review action selected."
+        "response": practice
+    }
+
+def prepare_review_inputs(
+    state: TutorState
+) -> dict:
+    """
+    Prepare the learner, topic, and mastery information
+    required for generating a personalized review.
+    """
+
+    # Load the learner's current topic and context.
+    current_topic = state.get(
+        "current_topic",
+        {}
+    )
+    learner_context = state.get(
+        "learner_context",
+        {}
+    )
+    topic_mastery = state.get(
+        "topic_mastery",
+        {}
+    )
+
+    # Review requires an active topic.
+    if not current_topic:
+        return {}
+
+    topic_id = current_topic.get("topic_id")
+    topic_name = current_topic.get("name")
+
+    # Stop safely if the topic information
+    # is incomplete.
+    if not topic_id or not topic_name:
+        return {}
+
+    # Prefer the learner's current assessed level.
+    # Fall back to the initial self-reported level.
+    student_level = (
+        learner_context.get("current_level")
+        or learner_context.get("initial_level")
+        or "beginner"
+    )
+
+    # Use detected weak areas to focus the review
+    # on concepts that need additional reinforcement.
+    weak_areas = topic_mastery.get(
+        "weak_areas",
+        []
+    )
+
+    return {
+        "topic_id": topic_id,
+        "topic_name": topic_name,
+        "student_level": student_level,
+        "weak_areas": weak_areas,
+    }
+
+
+def review_node(
+    state: TutorState
+) -> dict:
+    """
+    Generate a personalized review using the learner's
+    current topic, mastery information, and retrieved context.
+    """
+
+    # Prepare the learner, topic, and mastery information
+    # required for the review workflow.
+    review_inputs = prepare_review_inputs(state)
+
+    if not review_inputs:
+        return {
+            "response": (
+                "A review could not be generated "
+                "because no current topic is available."
+            )
+        }
+
+    # Retrieve relevant learning material from
+    # the RAG knowledge base for the current topic.
+    context = retrieve_topic_context(
+        topic_id=review_inputs["topic_id"],
+        topic_name=review_inputs["topic_name"]
+    )
+
+    if not context:
+        return {
+            "response": (
+                "A review could not be generated "
+                "because no learning context was found "
+                "for the current topic."
+            )
+        }
+
+    # Build a focused review request using the learner's
+    # detected weak areas when they are available.
+    weak_areas = review_inputs["weak_areas"]
+
+    if weak_areas:
+        weak_areas_text = ", ".join(weak_areas)
+
+        review_topic = (
+            f'Review "{review_inputs["topic_name"]}" '
+            f"with focus on these weak areas: "
+            f"{weak_areas_text}"
+        )
+    else:
+        review_topic = (
+            f'Review "{review_inputs["topic_name"]}" '
+            f"and summarize its key concepts."
+        )
+
+    # Reuse the explanation tool to generate a focused
+    # review grounded in the retrieved course material.
+    review = explain.invoke({
+        "topic": review_topic,
+        "context": context,
+        "student_level": review_inputs["student_level"],
+    })
+
+    return {
+        "response": review
     }
 
 

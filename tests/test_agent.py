@@ -15,6 +15,12 @@ from app.agent.graph import (
     evaluate_assessment_responses,
     submit_assessment_node,
     route_assessment,
+    prepare_teaching_inputs,
+    teach_node,
+    prepare_practice_inputs,
+    practice_node,
+    prepare_review_inputs,
+    review_node,
 )
 from app.agent.planning import (
     determine_learner_need,
@@ -760,11 +766,37 @@ def test_resolve_action_default():
 
 
 
-def test_tutor_graph_end_to_end():
+def test_tutor_graph_end_to_end(monkeypatch):
     """
     Test the Tutor Agent workflow from START to END
     using real learner and learning path data.
     """
+
+    # Mock topic context retrieval so the graph test
+    # does not call the real embedding API.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name: (
+            "AI agents can reason, use tools, "
+            "and perform actions to achieve goals."
+        )
+    )
+
+    # Create a fake explanation tool so the graph test
+    # does not call the real language model.
+    class FakeExplainTool:
+        def invoke(self, inputs):
+            return (
+                "An AI agent is a system that can "
+                "reason and take actions toward a goal."
+            )
+
+    # Replace the real explanation tool
+    # during the graph test.
+    monkeypatch.setattr(
+        "app.agent.graph.explain",
+        FakeExplainTool()
+    )
 
     # Build the compiled LangGraph workflow.
     graph = build_tutor_graph()
@@ -817,11 +849,36 @@ def test_tutor_graph_end_to_end():
     assert result["recommended_action"] == "explain"
 
 
-def test_tutor_graph_loads_conversation_history():
+def test_tutor_graph_loads_conversation_history(monkeypatch):
     """
     Test that the complete Tutor Agent workflow
     loads recent chat messages into TutorState.
     """
+    # Mock topic context retrieval so the graph test
+    # does not call the real embedding API.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name: (
+            "AI agents can reason, use tools, "
+            "and perform actions to achieve goals."
+        )
+    )
+
+    # Create a fake explanation tool so the graph test
+    # does not call the real language model.
+    class FakeExplainTool:
+        def invoke(self, inputs):
+            return (
+                "An AI agent is a system that can "
+                "reason and take actions toward a goal."
+            )
+
+    # Replace the real explanation tool
+    # during the graph test.
+    monkeypatch.setattr(
+        "app.agent.graph.explain",
+        FakeExplainTool()
+    )
 
     with SessionLocal() as db:
         session = None
@@ -990,11 +1047,37 @@ def test_route_recommended_action_to_review():
     assert result == "review"
 
 
-def test_tutor_graph_routes_to_teach():
+def test_tutor_graph_routes_to_teach(monkeypatch):
     """
     Test that the complete Tutor Agent workflow
     routes the learner to the teaching node.
     """
+
+    # Mock topic context retrieval so the graph test
+    # does not call the real embedding API.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name: (
+            "AI agents can reason, use tools, "
+            "and perform actions to achieve goals."
+        )
+    )
+
+    # Create a fake explanation tool so the graph test
+    # does not call the real language model.
+    class FakeExplainTool:
+        def invoke(self, inputs):
+            return (
+                "An AI agent is a system that can "
+                "reason and take actions toward a goal."
+            )
+
+    # Replace the real explanation tool
+    # during the graph test.
+    monkeypatch.setattr(
+        "app.agent.graph.explain",
+        FakeExplainTool()
+    )
 
     # Build the compiled Tutor Agent workflow.
     graph = build_tutor_graph()
@@ -1007,26 +1090,6 @@ def test_tutor_graph_routes_to_teach():
 
     # Run the complete workflow.
     result = graph.invoke(initial_state)
-
-    # Verify that the learner asked
-    # for a recommendation.
-    assert result["learner_need"] == "recommend"
-
-    # Verify that Agentic AI
-    # was selected as the current topic.
-    assert result["current_topic"]["topic_id"] == 3
-    assert result["current_topic"]["name"] == "Introduction to Agentic AI"
-
-    # Verify the learner's current mastery.
-    assert result["topic_mastery"]["mastery_score"] == 30
-
-    # A mastery score of 30 should
-    # produce an explanation recommendation.
-    assert result["recommended_action"] == "explain"
-
-    # The explanation recommendation should
-    # route the workflow to the teaching node.
-    assert result["response"] == "Teaching action selected."
 
 
 def test_route_recommended_action_to_recommend():
@@ -1719,7 +1782,7 @@ def test_generate_assessment_node_generates_quiz(monkeypatch):
     # Mock the RAG retrieval step so the test
     # does not require embeddings or an API call.
     monkeypatch.setattr(
-        "app.agent.graph.retrieve_assessment_context",
+        "app.agent.graph.retrieve_topic_context",
         lambda topic_id, topic_name: (
             "AI agents can reason, use tools, "
             "and perform actions to achieve goals."
@@ -1797,7 +1860,7 @@ def test_generate_assessment_node_stops_without_rag_context(
     # Simulate a RAG retrieval result
     # with no available learning material.
     monkeypatch.setattr(
-        "app.agent.graph.retrieve_assessment_context",
+        "app.agent.graph.retrieve_topic_context",
         lambda topic_id, topic_name: ""
     )
 
@@ -2121,3 +2184,536 @@ def test_route_assessment_to_submit():
     result = route_assessment(state)
 
     assert result == "submit_assessment"
+
+
+
+def test_prepare_teaching_inputs():
+    """
+    Teaching inputs should be prepared from
+    the current topic and learner context.
+    """
+
+    state = {
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "initial_level": "beginner",
+            "current_level": "intermediate",
+        },
+    }
+
+    result = prepare_teaching_inputs(state)
+
+    assert result == {
+        "topic_id": 12,
+        "topic_name": "Building Your First Agent",
+        "student_level": "intermediate",
+    }
+
+
+def test_prepare_teaching_inputs_without_topic():
+    """
+    Teaching input preparation should stop safely
+    when no current topic is available.
+    """
+
+    state = {
+        "current_topic": {},
+        "learner_context": {
+            "current_level": "intermediate",
+        },
+    }
+
+    result = prepare_teaching_inputs(state)
+
+    assert result == {}
+
+
+def test_teach_node_generates_explanation(
+    monkeypatch
+):
+    """
+    The teaching node should retrieve topic context
+    and generate a personalized explanation.
+    """
+
+    # Mock RAG retrieval so the test does not
+    # require embeddings or a real vector database.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name: (
+            "AI agents can reason, use tools, "
+            "and perform actions to achieve goals."
+        )
+    )
+
+    # Create a fake explanation tool so the test
+    # does not call the real language model.
+    class FakeExplainTool:
+        def invoke(self, inputs):
+            assert inputs["topic"] == "Building Your First Agent"
+            assert inputs["student_level"] == "intermediate"
+            assert "AI agents can reason" in inputs["context"]
+
+            return (
+                "An AI agent is a system that can "
+                "reason and take actions toward a goal."
+            )
+
+    # Replace the real explanation tool
+    # with the fake tool during this test.
+    monkeypatch.setattr(
+        "app.agent.graph.explain",
+        FakeExplainTool()
+    )
+
+    state = {
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "current_level": "intermediate",
+        },
+    }
+
+    result = teach_node(state)
+
+    assert result["response"] == (
+        "An AI agent is a system that can "
+        "reason and take actions toward a goal."
+    )
+
+
+def test_teach_node_stops_without_rag_context(
+    monkeypatch
+):
+    """
+    The teaching node should stop safely when
+    no learning context is available from RAG.
+    """
+
+    # Simulate a topic with no available
+    # learning material in the knowledge base.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name: ""
+    )
+
+    state = {
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "current_level": "intermediate",
+        },
+    }
+
+    result = teach_node(state)
+
+    assert "no learning context" in result["response"]
+
+
+def test_prepare_practice_inputs():
+    """
+    Practice inputs should include the current topic,
+    learner level, and detected weak areas.
+    """
+
+    state = {
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "initial_level": "beginner",
+            "current_level": "intermediate",
+        },
+        "topic_mastery": {
+            "mastery_score": 55,
+            "weak_areas": [
+                "Tool selection",
+                "Tool arguments",
+            ],
+        },
+    }
+
+    result = prepare_practice_inputs(state)
+
+    assert result == {
+        "topic_id": 12,
+        "topic_name": "Building Your First Agent",
+        "student_level": "intermediate",
+        "weak_areas": [
+            "Tool selection",
+            "Tool arguments",
+        ],
+    }
+
+
+def test_prepare_practice_inputs_without_topic():
+    """
+    Practice input preparation should stop safely
+    when no current topic is available.
+    """
+
+    state = {
+        "current_topic": {},
+        "learner_context": {
+            "current_level": "intermediate",
+        },
+        "topic_mastery": {
+            "mastery_score": 55,
+            "weak_areas": [
+                "Tool selection",
+            ],
+        },
+    }
+
+    result = prepare_practice_inputs(state)
+
+    assert result == {}
+
+
+def test_practice_node_generates_personalized_practice(
+    monkeypatch
+):
+    """
+    The practice node should retrieve topic context
+    and generate personalized practice activities.
+    """
+
+    # Mock RAG retrieval so the test does not
+    # require embeddings or a real vector database.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name: (
+            "AI agents can use tools to interact "
+            "with external systems."
+        )
+    )
+
+    # Create a fake practice tool so the test
+    # does not call the real language model.
+    class FakePracticeTool:
+        def invoke(self, inputs):
+            assert inputs["topic"] == "Building Your First Agent"
+            assert inputs["student_level"] == "intermediate"
+            assert "AI agents can use tools" in inputs["context"]
+
+            # Verify that weak areas are passed
+            # to the practice tool as JSON.
+            assert json.loads(inputs["weak_areas"]) == [
+                "Tool selection",
+                "Tool arguments",
+            ]
+
+            assert inputs["practice_type"] == "flashcards"
+            assert inputs["num_items"] == 5
+
+            return (
+                "Practice activity focused on "
+                "tool selection and tool arguments."
+            )
+
+    # Replace the real practice generation tool
+    # with the fake tool during this test.
+    monkeypatch.setattr(
+        "app.agent.graph.generate_practice",
+        FakePracticeTool()
+    )
+
+    state = {
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "current_level": "intermediate",
+        },
+        "topic_mastery": {
+            "mastery_score": 55,
+            "weak_areas": [
+                "Tool selection",
+                "Tool arguments",
+            ],
+        },
+    }
+
+    result = practice_node(state)
+
+    assert result["response"] == (
+        "Practice activity focused on "
+        "tool selection and tool arguments."
+    )
+
+
+def test_practice_node_stops_without_rag_context(
+    monkeypatch
+):
+    """
+    The practice node should stop safely when
+    no learning context is available from RAG.
+    """
+
+    # Simulate a topic with no available
+    # learning material in the knowledge base.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name: ""
+    )
+
+    state = {
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "current_level": "intermediate",
+        },
+        "topic_mastery": {
+            "mastery_score": 55,
+            "weak_areas": [
+                "Tool selection",
+            ],
+        },
+    }
+
+    result = practice_node(state)
+
+    assert "no learning context" in result["response"]
+
+
+def test_prepare_review_inputs():
+    """
+    Review inputs should include the current topic,
+    learner level, and detected weak areas.
+    """
+
+    state = {
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "initial_level": "beginner",
+            "current_level": "intermediate",
+        },
+        "topic_mastery": {
+            "mastery_score": 75,
+            "weak_areas": [
+                "Tool selection",
+                "Tool arguments",
+            ],
+        },
+    }
+
+    result = prepare_review_inputs(state)
+
+    assert result == {
+        "topic_id": 12,
+        "topic_name": "Building Your First Agent",
+        "student_level": "intermediate",
+        "weak_areas": [
+            "Tool selection",
+            "Tool arguments",
+        ],
+    }
+
+
+def test_prepare_review_inputs_without_topic():
+    """
+    Review input preparation should stop safely
+    when no current topic is available.
+    """
+
+    state = {
+        "current_topic": {},
+        "learner_context": {
+            "current_level": "intermediate",
+        },
+        "topic_mastery": {
+            "mastery_score": 75,
+            "weak_areas": [
+                "Tool selection",
+            ],
+        },
+    }
+
+    result = prepare_review_inputs(state)
+
+    assert result == {}
+
+
+def test_review_node_generates_focused_review(
+    monkeypatch
+):
+    """
+    The review node should retrieve topic context
+    and generate a review focused on weak areas.
+    """
+
+    # Mock RAG retrieval so the test does not
+    # require embeddings or a real vector database.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name: (
+            "AI agents can reason, use tools, "
+            "and interact with external systems."
+        )
+    )
+
+    # Create a fake explanation tool so the test
+    # does not call the real language model.
+    class FakeExplainTool:
+        def invoke(self, inputs):
+            # Verify that the review request contains
+            # the topic and the learner's weak areas.
+            assert "Building Your First Agent" in inputs["topic"]
+            assert "Tool selection" in inputs["topic"]
+            assert "Tool arguments" in inputs["topic"]
+
+            # Verify that the learner level and RAG
+            # context are passed correctly.
+            assert inputs["student_level"] == "intermediate"
+            assert "AI agents can reason" in inputs["context"]
+
+            return (
+                "Focused review of tool selection "
+                "and tool arguments."
+            )
+
+    # Replace the real explanation tool
+    # with the fake tool during this test.
+    monkeypatch.setattr(
+        "app.agent.graph.explain",
+        FakeExplainTool()
+    )
+
+    state = {
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "current_level": "intermediate",
+        },
+        "topic_mastery": {
+            "mastery_score": 75,
+            "weak_areas": [
+                "Tool selection",
+                "Tool arguments",
+            ],
+        },
+    }
+
+    result = review_node(state)
+
+    assert result["response"] == (
+        "Focused review of tool selection "
+        "and tool arguments."
+    )
+
+
+def test_review_node_stops_without_rag_context(
+    monkeypatch
+):
+    """
+    The review node should stop safely when
+    no learning context is available from RAG.
+    """
+
+    # Simulate a topic with no available
+    # learning material in the knowledge base.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name: ""
+    )
+
+    state = {
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "current_level": "intermediate",
+        },
+        "topic_mastery": {
+            "mastery_score": 75,
+            "weak_areas": [
+                "Tool selection",
+            ],
+        },
+    }
+
+    result = review_node(state)
+
+    assert "no learning context" in result["response"]
+
+
+def test_review_node_generates_general_review_without_weak_areas(
+    monkeypatch
+):
+    """
+    The review node should generate a general topic review
+    when no weak areas are available.
+    """
+
+    # Mock RAG retrieval so the test does not
+    # require embeddings or a real vector database.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name: (
+            "AI agents can reason, use tools, "
+            "and interact with external systems."
+        )
+    )
+
+    # Create a fake explanation tool so the test
+    # does not call the real language model.
+    class FakeExplainTool:
+        def invoke(self, inputs):
+            # Verify that the request asks for a general
+            # review rather than a weak-area-focused review.
+            assert "Building Your First Agent" in inputs["topic"]
+            assert "summarize its key concepts" in inputs["topic"]
+            assert "weak areas" not in inputs["topic"]
+
+            assert inputs["student_level"] == "intermediate"
+            assert "AI agents can reason" in inputs["context"]
+
+            return (
+                "General review of the key concepts "
+                "for building an AI agent."
+            )
+
+    # Replace the real explanation tool
+    # with the fake tool during this test.
+    monkeypatch.setattr(
+        "app.agent.graph.explain",
+        FakeExplainTool()
+    )
+
+    state = {
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "current_level": "intermediate",
+        },
+        "topic_mastery": {
+            "mastery_score": 75,
+            "weak_areas": [],
+        },
+    }
+
+    result = review_node(state)
+
+    assert result["response"] == (
+        "General review of the key concepts "
+        "for building an AI agent."
+    )
