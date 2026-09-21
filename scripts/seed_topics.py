@@ -127,6 +127,28 @@ def discover_lessons(source_root: Path) -> list[dict]:
             # source_root itself is a single course's chapters.
             course_name = source_root.name
             chapter_dirs = [entry]
+        elif not any(p.is_dir() for p in entry.iterdir()):
+            # Reference-material course: files sit directly in the course
+            # folder (no Chapter/Lesson subfolders) -- e.g. a single
+            # supplementary textbook used to "fill gaps" rather than a
+            # sequenced curriculum. Treat the whole folder as ONE lesson
+            # under a synthetic "Chapter 0 - Reference Material".
+            course_name = entry.name
+            lesson_name = "Reference Material"
+            lessons.append(
+                {
+                    "course_name": course_name,
+                    "chapter_number": 0,
+                    "lesson_dir": entry,
+                    "name": f"{course_name} | Ch0.1 \u2013 {lesson_name}",
+                    "description": (
+                        f"Course: {course_name} | Supplementary reference "
+                        f"material (not part of the sequenced curriculum)."
+                    ),
+                    "learning_objectives": _extract_learning_objectives(entry),
+                }
+            )
+            continue
         else:
             # entry is a course folder; its children are chapters.
             course_name = entry.name
@@ -243,11 +265,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source",
-        required=True,
+        default=str(Path(__file__).resolve().parent.parent / "knowledge_base" / "Materials"),
         help=(
             "Path to the knowledge-base root: either a single course's "
             "chapter folders directly, or a folder containing one or "
-            "more course folders."
+            "more course folders. Defaults to knowledge_base/Materials "
+            "at the project root."
         ),
     )
     args = parser.parse_args()
@@ -262,7 +285,7 @@ def main() -> None:
         print(f"Seeded/updated {len(topics)} topics:")
         for topic in topics:
             print(f"  [{topic.topic_id}] {topic.name}")
-        
+
     print(f"\nWrote folder->topic_id map to: {TOPIC_FOLDER_MAP_PATH}")
 
 
