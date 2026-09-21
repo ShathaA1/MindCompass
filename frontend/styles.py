@@ -410,6 +410,57 @@ def apply_global_styles():
 
             margin-top: 4px;
         }
+
+
+        /* =========================================================
+        Diagnostic Questions
+        ========================================================= */
+
+        .mc-question-card {
+            background: #FFFFFF;
+
+            border: 1px solid #DCECFB;
+            border-radius: 14px;
+
+            padding: 26px;
+
+            margin-top: 22px;
+            margin-bottom: 22px;
+
+            box-shadow:
+                0 4px 16px rgba(47, 95, 143, 0.04);
+        }
+
+        .mc-question-number {
+            color: #6AAEF2;
+
+            font-size: 0.82rem;
+            font-weight: 650;
+
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+
+            margin-bottom: 10px;
+        }
+
+        .mc-question-text {
+            color: #365F87;
+
+            font-size: 1.15rem;
+            font-weight: 600;
+
+            line-height: 1.55;
+        }
+
+
+        /* =========================================================
+        Diagnostic Answer Grid
+        ========================================================= */
+
+        div[data-testid="stHorizontalBlock"] {
+            gap: 14px;
+        }
+
         </style>
         """,
         unsafe_allow_html=True,
