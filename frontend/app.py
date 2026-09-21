@@ -6,8 +6,8 @@ from styles import apply_global_styles
 from api_client import get_profile, get_learning_path, login, register
 from pages.dashboard import render as render_dashboard
 from pages.onboarding import render as render_onboarding
-from pages.progress import render as render_progress
 from pages.diagnostic import render as render_diagnostic
+from pages.tutor import render as render_tutor
 
 st.set_page_config(
     page_title="MindCompass",
@@ -315,6 +315,85 @@ def show_learning_path():
         )
 
 
+def render_main_sidebar():
+    """Render the main MindCompass sidebar navigation."""
+
+    st.sidebar.title("MindCompass")
+    st.sidebar.caption("Your AI Tutor")
+
+    st.sidebar.markdown("### MAIN")
+
+    pages = [
+        "Dashboard",
+        "Tutor",
+        "Learning Path",
+    ]
+
+    current_page = st.session_state.get(
+        "page",
+        "Dashboard",
+    )
+
+    # Use Dashboard as the default page.
+    if current_page not in pages:
+        current_page = "Dashboard"
+
+    selected_page = st.sidebar.radio(
+        "Navigation",
+        pages,
+        index=pages.index(current_page),
+        label_visibility="collapsed",
+    )
+
+    st.sidebar.divider()
+
+    if st.sidebar.button(
+        "Logout",
+        use_container_width=True,
+    ):
+        logout()
+        return None
+
+    return selected_page
+
+
+def render_setup_sidebar():
+    """Render the sidebar while the learner completes setup."""
+
+    st.sidebar.title("MindCompass")
+    st.sidebar.caption("Your AI Tutor")
+
+    st.sidebar.markdown("### MAIN")
+
+    # Display the main pages as disabled during setup.
+    st.sidebar.markdown(
+        """
+        <div class="mc-disabled-nav">
+            <div>Dashboard</div>
+            <div>Tutor</div>
+            <div>Learning Path</div>
+        </div>
+
+        <div class="mc-setup-note">
+            Complete your learning setup to access these pages.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.sidebar.divider()
+
+    if st.sidebar.button(
+        "Logout",
+        use_container_width=True,
+    ):
+        logout()
+        return False
+
+    return True
+
+
+
 def show_authenticated_app():
     """Display navigation for an authenticated learner."""
 
@@ -323,6 +402,7 @@ def show_authenticated_app():
         False,
     )
 
+    # Keep onboarding separate from the main application.
     if not profile_complete:
         st.sidebar.title("MindCompass")
 
@@ -330,76 +410,93 @@ def show_authenticated_app():
             "Complete your profile to continue."
         )
 
-        if st.sidebar.button("Logout"):
+        if st.sidebar.button(
+            "Logout",
+            use_container_width=True,
+        ):
             logout()
+            return
 
         render_onboarding()
-
         return
 
-
-    # Keep the setup flow separate from the main application.
+    # Keep the diagnostic setup flow separate
+    # from the main application.
     setup_complete = st.session_state.get(
         "setup_complete",
         False,
     )
 
     if not setup_complete:
-        st.sidebar.title("🧭 MindCompass")
-
-        st.sidebar.write(
-            "Complete your learning setup to continue."
-        )
-
-        if st.sidebar.button("Logout"):
-            logout()
+        if not render_setup_sidebar():
             return
 
         render_diagnostic()
         return
 
+    # Main application navigation.
     st.sidebar.title("🧭 MindCompass")
+    st.sidebar.caption("Your AI Tutor")
+
+    st.sidebar.markdown("### MAIN")
 
     pages = [
         "Dashboard",
+        "Tutor",
         "Learning Path",
-        "Progress",
     ]
+
+    page_names = {
+        "Dashboard": "Dashboard",
+        "Tutor": "Tutor",
+        "Learning Path": "Learning Path",
+    }
 
     current_page = st.session_state.get(
         "page",
         "Dashboard",
     )
 
-    if current_page not in pages:
-        current_page = "Dashboard"
+    # Find the sidebar label that matches
+    # the currently active page.
+    current_label = next(
+        (
+            label
+            for label, page_name in page_names.items()
+            if page_name == current_page
+        ),
+        "Dashboard",
+    )
 
-    selected_page = st.sidebar.selectbox(
+    selected_label = st.sidebar.radio(
         "Navigation",
         pages,
-        index=pages.index(current_page),
+        index=pages.index(current_label),
+        label_visibility="collapsed",
     )
+
+    selected_page = page_names[selected_label]
 
     st.session_state["page"] = selected_page
 
-    if st.sidebar.button("Logout"):
+    st.sidebar.divider()
+
+    if st.sidebar.button(
+        "Logout",
+        use_container_width=True,
+    ):
         logout()
         return
 
+    # Render the selected main application page.
     if selected_page == "Dashboard":
         render_dashboard()
 
-    elif selected_page == "Onboarding":
-        render_onboarding()
-
-    elif selected_page == "Diagnostic":
-        render_diagnostic()
+    elif selected_page == "Tutor":
+        render_tutor()
 
     elif selected_page == "Learning Path":
         show_learning_path()
-
-    elif selected_page == "Progress":
-        render_progress()
 
 
 if "token" not in st.session_state:

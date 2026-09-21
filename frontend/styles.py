@@ -66,6 +66,81 @@ def apply_global_styles():
             color: #2F5F8F !important;
         }
 
+        /* =========================
+        Sidebar Navigation
+        ========================= */
+
+        /* Hide the default radio circles. */
+        section[data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {
+            display: none !important;
+        }
+
+        /* Style navigation items. */
+        section[data-testid="stSidebar"] div[role="radiogroup"] label {
+            width: 100%;
+            padding: 10px 14px !important;
+            margin-bottom: 5px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.18s ease;
+        }
+
+        /* Navigation text. */
+        section[data-testid="stSidebar"] div[role="radiogroup"] label p {
+            color: #5F7891 !important;
+            font-size: 0.95rem !important;
+            font-weight: 500 !important;
+        }
+
+        /* Hover state. */
+        section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+            background: #F0F7FE !important;
+        }
+
+        /* Selected navigation item. */
+        section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+            background: #E7F3FE !important;
+        }
+
+        /* Selected navigation text. */
+        section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) p {
+            color: #4E8FC7 !important;
+            font-weight: 600 !important;
+        }
+
+        /* =========================
+        Setup Sidebar Navigation
+        ========================= */
+
+        .mc-disabled-nav {
+            margin-top: 8px;
+        }
+
+        .mc-disabled-nav div {
+            padding: 10px 14px;
+            margin-bottom: 5px;
+            border-radius: 8px;
+
+            color: #9AAFC2;
+            font-size: 0.95rem;
+            font-weight: 500;
+
+            cursor: default;
+            user-select: none;
+        }
+
+        .mc-setup-note {
+            margin-top: 18px;
+            padding: 12px 14px;
+
+            background: #F5FAFE;
+            border: 1px solid #E1EFFB;
+            border-radius: 8px;
+
+            color: #7894AD;
+            font-size: 0.82rem;
+            line-height: 1.5;
+        }
 
         /* =========================================================
         Buttons
