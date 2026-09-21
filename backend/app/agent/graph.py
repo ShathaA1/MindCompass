@@ -297,18 +297,16 @@ def build_tutor_graph():
         load_learner_context_node
     )
 
-        # Add the node that generates the initial
+    # Add the node that generates the initial
     # diagnostic for a newly selected learning path.
     workflow.add_node(
         "generate_initial_diagnostic",
-        generate_initial_diagnostic_node
+        generate_initial_diagnostic_graph_node
     )
 
-    # Add the node that processes diagnostic answers
-    # and creates the personalized learning path.
     workflow.add_node(
         "submit_initial_diagnostic",
-        submit_initial_diagnostic_node
+        submit_initial_diagnostic_graph_node
     )
 
     workflow.add_node(
@@ -832,7 +830,20 @@ def generate_initial_diagnostic_node(
         ),
     }
 
+def generate_initial_diagnostic_graph_node(
+    state: TutorState
+) -> dict:
+    """
+    LangGraph wrapper that generates the initial diagnostic
+    using its own database session.
+    """
 
+    # Open a database session for this graph node.
+    with SessionLocal() as db:
+        return generate_initial_diagnostic_node(
+            state=state,
+            db=db
+        )
 
 def submit_initial_diagnostic_node(
     state: TutorState,
@@ -991,6 +1002,23 @@ def submit_initial_diagnostic_node(
             "and your personalized learning path is ready."
         ),
     }
+
+
+def submit_initial_diagnostic_graph_node(
+    state: TutorState
+) -> dict:
+    """
+    LangGraph wrapper that processes the submitted diagnostic
+    using its own database session.
+    """
+
+    # Open a database session for this graph node.
+    with SessionLocal() as db:
+        return submit_initial_diagnostic_node(
+            state=state,
+            db=db
+        )
+
 
 def generate_assessment_node(
     state: TutorState

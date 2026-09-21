@@ -1,12 +1,13 @@
 """Configures the main Streamlit application and learner navigation."""
 
 import streamlit as st
+from styles import apply_global_styles
 
 from api_client import get_profile, get_learning_path, login, register
 from pages.dashboard import render as render_dashboard
 from pages.onboarding import render as render_onboarding
 from pages.progress import render as render_progress
-
+from pages.diagnostic import render as render_diagnostic
 
 st.set_page_config(
     page_title="MindCompass",
@@ -14,6 +15,7 @@ st.set_page_config(
     layout="wide",
 )
 
+apply_global_styles()
 
 def create_columns(spec):
     """Support both old and new Streamlit versions."""
@@ -32,12 +34,19 @@ def rerun_app():
 
 
 def logout():
-    """Clear the current learner session."""
+    """Clear all data stored for the current learner session."""
+
+    # Clear authentication, navigation, and learning setup data.
     for key in [
         "token",
         "page",
         "profile_complete",
+        "setup_complete",
         "welcome_mode",
+        "selected_path",
+        "diagnostic_topics",
+        "diagnostic_questions",
+        "diagnostic_started",
     ]:
         if key in st.session_state:
             del st.session_state[key]
@@ -75,12 +84,19 @@ def show_welcome():
         login_col, register_col = create_columns(2)
 
         with login_col:
-            if st.button("Login"):
+            if st.button(
+                "Login",
+                type="primary",
+                use_container_width=True,
+            ):
                 st.session_state["welcome_mode"] = "Login"
                 rerun_app()
 
         with register_col:
-            if st.button("Create Account"):
+            if st.button(
+                "Create Account",
+                use_container_width=True,
+            ):
                 st.session_state["welcome_mode"] = "Register"
                 rerun_app()
 
@@ -137,10 +153,29 @@ def show_login():
 
                 if profile_response.status_code == 200:
                     st.session_state["profile_complete"] = True
-                    st.session_state["page"] = "Dashboard"
+
+                    # Check whether the learner already has
+                    # a personalized learning path.
+                    path_response = get_learning_path(token)
+
+                    if (
+                        path_response.status_code == 200
+                        and path_response.json().get("learning_path") is not None
+                    ):
+                        # Existing learners with a learning path
+                        # continue directly to the main application.
+                        st.session_state["setup_complete"] = True
+                        st.session_state["page"] = "Dashboard"
+
+                    else:
+                        # Learners without a learning path must complete
+                        # learning path selection and the diagnostic first.
+                        st.session_state["setup_complete"] = False
+                        st.session_state["page"] = "Diagnostic"
 
                 elif profile_response.status_code == 404:
                     st.session_state["profile_complete"] = False
+                    st.session_state["setup_complete"] = False
                     st.session_state["page"] = "Onboarding"
 
                 else:
@@ -302,11 +337,31 @@ def show_authenticated_app():
 
         return
 
+
+    # Keep the setup flow separate from the main application.
+    setup_complete = st.session_state.get(
+        "setup_complete",
+        False,
+    )
+
+    if not setup_complete:
+        st.sidebar.title("🧭 MindCompass")
+
+        st.sidebar.write(
+            "Complete your learning setup to continue."
+        )
+
+        if st.sidebar.button("Logout"):
+            logout()
+            return
+
+        render_diagnostic()
+        return
+
     st.sidebar.title("🧭 MindCompass")
 
     pages = [
         "Dashboard",
-        "Onboarding",
         "Learning Path",
         "Progress",
     ]
@@ -336,6 +391,9 @@ def show_authenticated_app():
 
     elif selected_page == "Onboarding":
         render_onboarding()
+
+    elif selected_page == "Diagnostic":
+        render_diagnostic()
 
     elif selected_page == "Learning Path":
         show_learning_path()

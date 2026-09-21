@@ -2924,7 +2924,7 @@ def test_submit_initial_diagnostic_node(monkeypatch):
         goal,
     ):
         assert user_id == 2
-        assert target_topic_id == 17
+        assert target_topic_id == 25
         assert path_name == "Agentic AI Learning Path"
         assert goal == "Learn Agentic AI"
 
@@ -2934,7 +2934,7 @@ def test_submit_initial_diagnostic_node(monkeypatch):
             "name": "Agentic AI Learning Path",
             "goal": "Learn Agentic AI",
             "status": "active",
-            "topic_ids": list(range(1, 18)),
+            "topic_ids": list(range(1, 26)),
         }
 
     monkeypatch.setattr(
@@ -3189,3 +3189,33 @@ def test_route_initial_setup_to_submit_diagnostic():
     result = route_initial_setup(state)
 
     assert result == "submit_initial_diagnostic"
+
+
+def test_tutor_graph_initial_diagnostic_flow():
+    """
+    Test that the compiled Tutor Agent graph can route
+    a newly selected learning path through initial setup.
+    """
+
+    # Build the real compiled LangGraph workflow.
+    graph = build_tutor_graph()
+
+    # Python currently has no prerequisite diagnostic topics,
+    # so this test does not require RAG or an LLM call.
+    state = {
+        "user_id": 2,
+        "selected_path": "python",
+    }
+
+    # Run the actual compiled graph.
+    result = graph.invoke(state)
+
+    assert result["selected_path"] == "python"
+    assert result["assessment_type"] == "diagnostic"
+    assert result["diagnostic_topics"] == []
+    assert result["assessment_questions"] == []
+
+    assert (
+        "no prerequisite diagnostic assessment"
+        in result["response"].lower()
+    )

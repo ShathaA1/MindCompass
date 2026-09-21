@@ -1464,7 +1464,7 @@ def test_agentic_ai_required_topics():
     with SessionLocal() as db:
         topic_ids = get_required_topic_ids(
             db,
-            17
+            25
         )
 
-        assert topic_ids == list(range(1, 18))
+        assert topic_ids == list(range(1, 26))

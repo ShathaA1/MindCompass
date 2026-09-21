@@ -14,50 +14,110 @@ LEARNING_STYLES = [
 
 
 def render():
-    """Display the learner onboarding form."""
+    """
+    Display the learner onboarding form.
+    """
 
-    st.header("Onboarding")
+    # ---------- Page introduction ----------
 
-    st.write(
-        "Tell MindCompass how you prefer to learn."
+    st.markdown(
+        '<div class="mc-eyebrow">Getting Started</div>',
+        unsafe_allow_html=True,
     )
+
+    st.markdown(
+        '<div class="mc-page-title">'
+        "Personalize your learning experience"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="mc-page-description">
+            Tell MindCompass about your learning preferences.
+            We'll use them to adapt your learning experience.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="mc-card">
+            <div class="mc-card-title">
+                Your learning profile
+            </div>
+            <div class="mc-card-text">
+                These preferences help the tutor understand
+                how you want to learn.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ---------- Learning goal ----------
 
     goal = st.text_input(
-        "Learning Goal"
+        "Learning Goal",
+        placeholder=(
+            "Example: Build practical AI engineering skills"
+        ),
     )
 
-    level = st.selectbox(
-        "Current Level",
-        [
-            "beginner",
-            "intermediate",
-            "advanced",
-        ],
-    )
+    # ---------- Level and weekly availability ----------
 
-    weekly_hours = st.number_input(
-        "Weekly Learning Hours",
-        min_value=1,
-        max_value=40,
-        value=5,
-    )
+    level_col, hours_col = st.columns(2)
 
-    learning_style = st.selectbox(
-        "Preferred Learning Style",
-        LEARNING_STYLES,
-    )
+    with level_col:
+        level = st.selectbox(
+            "Current Level",
+            [
+                "beginner",
+                "intermediate",
+                "advanced",
+            ],
+        )
 
-    pace = st.selectbox(
-        "Preferred Pace",
-        [
-            "slow",
-            "moderate",
-            "fast",
-        ],
-        index=1,
-    )
+    with hours_col:
+        weekly_hours = st.number_input(
+            "Weekly Learning Hours",
+            min_value=1,
+            max_value=40,
+            value=5,
+        )
 
-    if st.button("Save Profile"):
+    # ---------- Learning preferences ----------
+
+    style_col, pace_col = st.columns(2)
+
+    with style_col:
+        learning_style = st.selectbox(
+            "Preferred Learning Style",
+            LEARNING_STYLES,
+        )
+
+    with pace_col:
+        pace = st.selectbox(
+            "Preferred Pace",
+            [
+                "slow",
+                "moderate",
+                "fast",
+            ],
+            index=1,
+        )
+
+    st.write("")
+
+    # ---------- Save learner profile ----------
+
+    if st.button(
+        "Continue →",
+        type="primary",
+        use_container_width=True,
+    ):
         if not goal.strip():
             st.warning(
                 "Please enter your learning goal."
@@ -84,7 +144,10 @@ def render():
                 )
 
                 st.session_state["profile_complete"] = True
-                st.session_state["page"] = "Dashboard"
+
+                # Continue directly to learning path selection
+                # and the initial diagnostic.
+                st.session_state["page"] = "Diagnostic"
 
                 if hasattr(st, "rerun"):
                     st.rerun()

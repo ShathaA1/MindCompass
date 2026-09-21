@@ -3,12 +3,21 @@
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
+
+# Resolve the project root so .env can be loaded
+# regardless of the current working directory.
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+ENV_FILE = PROJECT_ROOT / ".env"
 
 
 class Settings(BaseSettings):
     """Central application configuration, populated from environment/.env."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+    env_file=ENV_FILE,
+    extra="ignore",
+    )
 
     # PostgreSQL connection
     database_url: str = "postgresql+psycopg://postgres:password@localhost:5432/mindcompass"

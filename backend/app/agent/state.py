@@ -25,6 +25,12 @@ class TutorState(TypedDict, total=False):
     # Assessment state
     assessment_type: str
     assessment_questions: list[dict[str, Any]]
+    assessment_answers: list[dict[str, Any]]
+    assessment_result: dict[str, Any]
+
+    # Initial learning path setup
+    selected_path: str
+    diagnostic_topics: list[dict[str, Any]]
 
     # Final result from other nodes/tools
     response: str

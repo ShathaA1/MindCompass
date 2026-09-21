@@ -6,7 +6,33 @@ from api_client import get_dashboard, get_learning_path
 
 
 def render():
-    st.header("Dashboard")
+    """
+    Display the learner dashboard.
+    """
+
+    # ---------- Page introduction ----------
+
+    st.markdown(
+        '<div class="mc-eyebrow">Dashboard</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<div class="mc-page-title">'
+        "Your learning journey"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="mc-page-description">
+            Track your learning profile, current path,
+            and assessment progress.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     token = st.session_state["token"]
 
@@ -19,41 +45,105 @@ def render():
 
         data = response.json()
 
+        # ---------- Learning profile ----------
+
         st.subheader("Learning Profile")
 
-        st.write("Goal:", data.get("goal", "-"))
-        st.write("Current Level:", data.get("current_level", "-"))
-        st.write("Weekly Hours:", data.get("weekly_hours", "-"))
-        st.write("Topics Assessed:", data.get("topics_assessed", 0))
+        level_col, hours_col, assessed_col = st.columns(3)
 
-        st.markdown("---")
+        with level_col:
+            st.metric(
+                "Current Level",
+                str(data.get("current_level", "-")).title(),
+            )
+
+        with hours_col:
+            st.metric(
+                "Weekly Hours",
+                data.get("weekly_hours", "-"),
+            )
+
+        with assessed_col:
+            st.metric(
+                "Topics Assessed",
+                data.get("topics_assessed", 0),
+            )
+
+        st.markdown(
+            f"""
+            <div class="mc-card">
+                <div class="mc-card-title">
+                    Learning Goal
+                </div>
+                <div class="mc-card-text">
+                    {data.get("goal", "-")}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # ---------- Personalized learning path ----------
 
         st.subheader("Learning Path")
 
         path_response = get_learning_path(token)
 
-        if path_response.status_code == 200:
-            path_data = path_response.json()
+        if path_response.status_code != 200:
+            st.error(
+                "Unable to load learning path."
+            )
+            return
 
-            if path_data.get("learning_path") is None:
-                st.info(
-                    "Your personalized learning path has not been generated yet."
-                )
-            else:
-                learning_path = path_data["learning_path"]
+        path_data = path_response.json()
 
-                st.write(
-                    "Path:",
-                    learning_path.get("name", "Personalized Learning Path"),
-                )
+        if path_data.get("learning_path") is None:
+            st.info(
+                "Your personalized learning path "
+                "has not been generated yet."
+            )
+            return
 
-                items = path_data.get("items", [])
+        learning_path = path_data["learning_path"]
 
-                for item in items:
-                    st.write(
-                        f"{item.get('position')}. "
-                        f"{item.get('topic_name')}"
-                    )
+        st.markdown(
+            f"""
+            <div class="mc-card">
+                <div class="mc-card-title">
+                    {learning_path.get(
+                        "name",
+                        "Personalized Learning Path",
+                    )}
+                </div>
+                <div class="mc-card-text">
+                    Your current personalized learning path.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        items = path_data.get("items", [])
+
+        for item in items:
+            position = item.get("position", "")
+            topic_name = item.get(
+                "topic_name",
+                "Topic",
+            )
+
+            st.markdown(
+                f"""
+                <div class="mc-card">
+                    <div class="mc-card-title">
+                        {position}. {topic_name}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     except Exception as error:
-        st.error(f"Connection error: {error}")
+        st.error(
+            f"Connection error: {error}"
+        )

@@ -125,3 +125,40 @@ def get_learning_path(token):
         timeout=REQUEST_TIMEOUT,
     )
 
+def start_diagnostic(token, selected_path):
+    """
+    Start the initial diagnostic for the learner's
+    selected learning path.
+    """
+
+    return requests.post(
+        f"{BASE_URL}/learning/diagnostic/start",
+        headers=_headers(token),
+        json={
+            "selected_path": selected_path,
+        },
+        timeout=REQUEST_TIMEOUT,
+    )
+
+
+def submit_diagnostic(
+    token,
+    selected_path,
+    assessment_questions,
+    assessment_answers,
+):
+    """
+    Submit the learner's initial diagnostic answers
+    to create the personalized learning path.
+    """
+
+    return requests.post(
+        f"{BASE_URL}/learning/diagnostic/submit",
+        headers=_headers(token),
+        json={
+            "selected_path": selected_path,
+            "assessment_questions": assessment_questions,
+            "assessment_answers": assessment_answers,
+        },
+        timeout=REQUEST_TIMEOUT,
+    )

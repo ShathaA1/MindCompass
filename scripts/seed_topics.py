@@ -200,7 +200,10 @@ def seed_topics(session: Session, source_root: Path) -> list[Topic]:
 
     all_topics: list[Topic] = []
     folder_map_entries: list[dict] = []
-    previous_topic_by_course_chapter: dict[tuple[str, int], Topic] = {}
+    # Track the previous topic within each course.
+    # This allows prerequisite chains to continue across chapter boundaries
+    # without linking topics from different courses.
+    previous_topic_by_course: dict[str, Topic] = {}
 
     for lesson in lessons:
         topic = existing_topics_by_name.get(lesson["name"])
@@ -219,8 +222,11 @@ def seed_topics(session: Session, source_root: Path) -> list[Topic]:
             topic.description = lesson["description"]
             topic.learning_objectives = lesson["learning_objectives"]
 
-        key = (lesson["course_name"], lesson["chapter_number"])
-        previous_topic = previous_topic_by_course_chapter.get(key)
+        # Use the course name as the key so the prerequisite chain
+        # continues across chapter boundaries within the same course.
+        course_name = lesson["course_name"]
+        previous_topic = previous_topic_by_course.get(course_name)
+
         if previous_topic is not None:
             already_linked = (
                 session.query(TopicPrerequisite)
@@ -230,6 +236,7 @@ def seed_topics(session: Session, source_root: Path) -> list[Topic]:
                 )
                 .first()
             )
+
             if already_linked is None:
                 session.add(
                     TopicPrerequisite(
@@ -237,7 +244,9 @@ def seed_topics(session: Session, source_root: Path) -> list[Topic]:
                         prerequisite_topic_id=previous_topic.topic_id,
                     )
                 )
-        previous_topic_by_course_chapter[key] = topic
+
+        # Save the current topic as the previous topic for this course.
+        previous_topic_by_course[course_name] = topic
 
         all_topics.append(topic)
         folder_map_entries.append(
