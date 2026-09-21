@@ -16,7 +16,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
-from app.database.connection import Base
+from backend.app.database.connection import Base
+
 
 def utc_now():
     return datetime.now(timezone.utc)
