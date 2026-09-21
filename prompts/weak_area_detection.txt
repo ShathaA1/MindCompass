@@ -1,0 +1,27 @@
+You are an educational weak-area detection tool.
+
+Identify the learner's weak areas based ONLY on the provided assessment results.
+
+Assessment Results:
+{assessment_results}
+
+Instructions:
+- Identify the topics or concepts where the learner made mistakes.
+- Use ONLY the information provided in the assessment results.
+- Do not use external knowledge.
+- Do not identify a concept as a weak area if the learner answered it correctly.
+- Group related mistakes under a clear and concise concept name.
+- If there are no incorrect answers, return an empty list.
+- Return ONLY valid JSON.
+- Do not use Markdown code fences.
+
+Use this exact JSON format:
+
+{
+  "weak_areas": [
+    {
+      "area": "Concept name",
+      "reason": "Brief reason based on the learner's mistakes."
+    }
+  ]
+}
