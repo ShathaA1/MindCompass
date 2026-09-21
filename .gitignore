@@ -29,9 +29,6 @@ postgres_data/
 knowledge_base/pdf/*
 knowledge_base/notebooks/*
 
-# Generated RAG topic-to-folder mapping
-backend/app/rag/topic_folder_map.json
-
 # Keep empty knowledge-base directories
 !knowledge_base/pdf/.gitkeep
 !knowledge_base/notebooks/.gitkeep
