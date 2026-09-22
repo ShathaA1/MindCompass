@@ -52,6 +52,78 @@ def apply_global_styles():
 
 
         /* =========================================================
+        Welcome Page
+        ========================================================= */
+
+        .mc-welcome-content {
+            max-width: 760px;
+            margin: -10px auto 26px auto;
+            text-align: center;
+        }
+
+        .mc-welcome-content h1 {
+            color: #2F5F8F;
+            font-size: 2.7rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .mc-welcome-content h2 {
+            color: #6AAEF2;
+            font-size: 1.35rem;
+            font-weight: 500;
+            margin-top: 0;
+            margin-bottom: 18px;
+        }
+
+        .mc-welcome-description {
+            max-width: 650px;
+            margin: 0 auto;
+            color: #718CA7;
+            font-size: 1rem;
+            line-height: 1.7;
+        }
+
+        .mc-welcome-footer {
+            margin-top: 22px;
+            text-align: center;
+            color: #9AAFC2;
+            font-size: 0.82rem;
+        }
+
+
+
+        /* =========================================================
+        Authentication
+        ========================================================= */
+
+        .mc-auth-header {
+            text-align: center;
+            margin: 20px 0 28px 0;
+        }
+
+        .mc-auth-header h1 {
+            color: #2F5F8F;
+            font-size: 2rem;
+            font-weight: 650;
+            margin-bottom: 6px;
+        }
+
+        .mc-auth-header p {
+            color: #7894AD;
+            font-size: 0.95rem;
+            margin: 0;
+        }
+
+        .mc-auth-switch-text {
+            text-align: center;
+            color: #829AAF;
+            font-size: 0.85rem;
+            margin-top: 22px;
+            margin-bottom: 8px;
+        }
+
+        /* =========================================================
            Sidebar
            ========================================================= */
 

@@ -57,49 +57,76 @@ def logout():
 def show_welcome():
     """Display the welcome screen before authentication."""
 
-    st.image(
-        "frontend/assets/mindcompass_logo.png",
-        width=500,
-    )
-
-    st.markdown(
-        """
-        <div style="text-align: center;">
-            <h1>MindCompass</h1>
-            <h3>Your Personalized Agentic AI Tutor</h3>
-            <p>
-                A personalized learning experience that adapts
-                to your goals, level, and progress.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("---")
-
     mode = st.session_state.get("welcome_mode")
 
+    # Display the landing page when no authentication
+    # form is currently selected.
     if mode is None:
-        login_col, register_col = create_columns(2)
+        st.markdown(
+            '<div class="mc-welcome-page">',
+            unsafe_allow_html=True,
+        )
 
-        with login_col:
+        # Display the MindCompass logo.
+        logo_col_left, logo_col, logo_col_right = st.columns(
+            [1, 1.2, 1]
+        )
+
+        with logo_col:
+            st.image(
+                "frontend/assets/mindcompass_logo.png",
+                width="stretch",
+            )
+
+        # Main welcome content.
+        welcome_html = (
+            '<div class="mc-welcome-content">'
+            '<h1>MindCompass</h1>'
+            '<h2>Your Personalized AI Tutor</h2>'
+            '<p class="mc-welcome-description">'
+            'A learning experience that understands your goals, '
+            'adapts to your level, and guides you through every '
+            'step of your learning journey.'
+            '</p>'
+            '</div>'
+        )
+
+        st.markdown(
+            welcome_html,
+            unsafe_allow_html=True,
+        )
+
+        # Keep the main actions centered.
+        left_space, action_col, right_space = st.columns(
+            [1, 1.2, 1]
+        )
+
+        with action_col:
             if st.button(
                 "Login",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             ):
                 st.session_state["welcome_mode"] = "Login"
                 rerun_app()
 
-        with register_col:
             if st.button(
                 "Create Account",
-                use_container_width=True,
+                width="stretch",
             ):
                 st.session_state["welcome_mode"] = "Register"
                 rerun_app()
 
+        st.markdown(
+            """
+            <p class="mc-welcome-footer">
+                Learn at your pace. Adapt as you grow.
+            </p>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # Display the login form.
     elif mode == "Login":
         if st.button("← Back"):
             del st.session_state["welcome_mode"]
@@ -107,6 +134,7 @@ def show_welcome():
 
         show_login()
 
+    # Display the registration form.
     elif mode == "Register":
         if st.button("← Back"):
             del st.session_state["welcome_mode"]
@@ -118,144 +146,247 @@ def show_welcome():
 def show_login():
     """Display the login form."""
 
-    st.subheader("Login")
-
-    email = st.text_input(
-        "Email",
-        key="login_email",
+    # Center the login form on the page.
+    left_space, form_col, right_space = st.columns(
+        [1, 1.2, 1]
     )
 
-    password = st.text_input(
-        "Password",
-        type="password",
-        key="login_password",
-    )
+    with form_col:
+        st.markdown(
+            (
+                '<div class="mc-auth-header">'
+                '<h1>Welcome back</h1>'
+                '<p>Sign in to continue your learning journey.</p>'
+                '</div>'
+            ),
+            unsafe_allow_html=True,
+        )
 
-    if st.button("Login"):
-        if not email or not password:
-            st.warning(
-                "Please enter your email and password."
-            )
-            return
+        email = st.text_input(
+            "Email",
+            placeholder="Enter your email",
+            key="login_email",
+        )
 
-        try:
-            response = login(
-                email,
-                password,
-            )
+        password = st.text_input(
+            "Password",
+            type="password",
+            placeholder="Enter your password",
+            key="login_password",
+        )
 
-            if response.status_code == 200:
-                token = response.json()["access_token"]
+        if st.button(
+            "Login",
+            type="primary",
+            width="stretch",
+        ):
+            if not email or not password:
+                st.warning(
+                    "Please enter your email and password."
+                )
+                return
 
-                st.session_state["token"] = token
-
-                profile_response = get_profile(token)
-
-                if profile_response.status_code == 200:
-                    st.session_state["profile_complete"] = True
-
-                    # Check whether the learner already has
-                    # a personalized learning path.
-                    path_response = get_learning_path(token)
-
-                    if (
-                        path_response.status_code == 200
-                        and path_response.json().get("learning_path") is not None
-                    ):
-                        # Existing learners with a learning path
-                        # continue directly to the main application.
-                        st.session_state["setup_complete"] = True
-                        st.session_state["page"] = "Dashboard"
-
-                    else:
-                        # Learners without a learning path must complete
-                        # learning path selection and the diagnostic first.
-                        st.session_state["setup_complete"] = False
-                        st.session_state["page"] = "Diagnostic"
-
-                elif profile_response.status_code == 404:
-                    st.session_state["profile_complete"] = False
-                    st.session_state["setup_complete"] = False
-                    st.session_state["page"] = "Onboarding"
-
-                else:
-                    st.error(
-                        "Unable to check learner profile."
-                    )
-                    return
-
-                rerun_app()
-
-            else:
-                detail = response.json().get(
-                    "detail",
-                    "Invalid email or password.",
+            try:
+                response = login(
+                    email,
+                    password,
                 )
 
-                st.error(detail)
+                if response.status_code == 200:
+                    token = response.json()["access_token"]
 
-        except Exception as error:
-            st.error(
-                f"Connection error: {error}"
-            )
+                    st.session_state["token"] = token
+
+                    profile_response = get_profile(token)
+
+                    if profile_response.status_code == 200:
+                        st.session_state[
+                            "profile_complete"
+                        ] = True
+
+                        # Check whether the learner already has
+                        # a personalized learning path.
+                        path_response = get_learning_path(
+                            token
+                        )
+
+                        if (
+                            path_response.status_code == 200
+                            and path_response.json().get(
+                                "learning_path"
+                            ) is not None
+                        ):
+                            # Existing learners with a learning path
+                            # continue directly to the main application.
+                            st.session_state[
+                                "setup_complete"
+                            ] = True
+
+                            st.session_state[
+                                "page"
+                            ] = "Dashboard"
+
+                        else:
+                            # Learners without a learning path must
+                            # complete the learning setup first.
+                            st.session_state[
+                                "setup_complete"
+                            ] = False
+
+                            st.session_state[
+                                "page"
+                            ] = "Diagnostic"
+
+                    elif profile_response.status_code == 404:
+                        st.session_state[
+                            "profile_complete"
+                        ] = False
+
+                        st.session_state[
+                            "setup_complete"
+                        ] = False
+
+                        st.session_state[
+                            "page"
+                        ] = "Onboarding"
+
+                    else:
+                        st.error(
+                            "Unable to check learner profile."
+                        )
+                        return
+
+                    rerun_app()
+
+                else:
+                    detail = response.json().get(
+                        "detail",
+                        "Invalid email or password.",
+                    )
+
+                    st.error(detail)
+
+            except Exception as error:
+                st.error(
+                    f"Connection error: {error}"
+                )
+
+        st.markdown(
+            '<p class="mc-auth-switch-text">'
+            "Don't have an account?"
+            '</p>',
+            unsafe_allow_html=True,
+        )
+
+        if st.button(
+            "Create Account",
+            width="stretch",
+            key="login_create_account",
+        ):
+            st.session_state[
+                "welcome_mode"
+            ] = "Register"
+
+            rerun_app()
 
 
 def show_register():
     """Display the registration form."""
 
-    st.subheader("Create Account")
-
-    name = st.text_input(
-        "Name",
-        key="register_name",
+    # Center the registration form on the page.
+    left_space, form_col, right_space = st.columns(
+        [1, 1.2, 1]
     )
 
-    email = st.text_input(
-        "Email",
-        key="register_email",
-    )
+    with form_col:
+        st.markdown(
+            (
+                '<div class="mc-auth-header">'
+                '<h1>Create your account</h1>'
+                '<p>Start your personalized learning journey.</p>'
+                '</div>'
+            ),
+            unsafe_allow_html=True,
+        )
 
-    password = st.text_input(
-        "Password",
-        type="password",
-        key="register_password",
-    )
+        name = st.text_input(
+            "Name",
+            placeholder="Enter your name",
+            key="register_name",
+        )
 
-    if st.button("Create Account"):
-        if not name or not email or not password:
-            st.warning(
-                "Please complete all fields."
-            )
-            return
+        email = st.text_input(
+            "Email",
+            placeholder="Enter your email",
+            key="register_email",
+        )
 
-        try:
-            response = register(
-                name,
-                email,
-                password,
-            )
+        password = st.text_input(
+            "Password",
+            type="password",
+            placeholder="Create a password",
+            key="register_password",
+        )
 
-            if response.status_code == 200:
-                st.success(
-                    "Account created successfully."
+        if st.button(
+            "Create Account",
+            type="primary",
+            width="stretch",
+        ):
+            if not name or not email or not password:
+                st.warning(
+                    "Please complete all fields."
+                )
+                return
+
+            try:
+                response = register(
+                    name,
+                    email,
+                    password,
                 )
 
-                st.session_state["welcome_mode"] = "Login"
+                if response.status_code == 200:
+                    st.success(
+                        "Account created successfully."
+                    )
 
-                rerun_app()
+                    st.session_state[
+                        "welcome_mode"
+                    ] = "Login"
 
-            else:
-                detail = response.json().get(
-                    "detail",
-                    "Unable to create account.",
+                    rerun_app()
+
+                else:
+                    detail = response.json().get(
+                        "detail",
+                        "Unable to create account.",
+                    )
+
+                    st.error(detail)
+
+            except Exception as error:
+                st.error(
+                    f"Connection error: {error}"
                 )
 
-                st.error(detail)
+        st.markdown(
+            '<p class="mc-auth-switch-text">'
+            'Already have an account?'
+            '</p>',
+            unsafe_allow_html=True,
+        )
 
-        except Exception as error:
-            st.error(
-                f"Connection error: {error}"
-            )
+        if st.button(
+            "Login",
+            width="stretch",
+            key="register_login",
+        ):
+            st.session_state[
+                "welcome_mode"
+            ] = "Login"
+
+            rerun_app()
 
 
 def show_learning_path():
@@ -349,7 +480,7 @@ def render_main_sidebar():
 
     if st.sidebar.button(
         "Logout",
-        use_container_width=True,
+        width="stretch",
     ):
         logout()
         return None
@@ -385,7 +516,7 @@ def render_setup_sidebar():
 
     if st.sidebar.button(
         "Logout",
-        use_container_width=True,
+        width="stretch",
     ):
         logout()
         return False
@@ -412,7 +543,7 @@ def show_authenticated_app():
 
         if st.sidebar.button(
             "Logout",
-            use_container_width=True,
+            width="stretch",
         ):
             logout()
             return
@@ -483,7 +614,7 @@ def show_authenticated_app():
 
     if st.sidebar.button(
         "Logout",
-        use_container_width=True,
+        width="stretch",
     ):
         logout()
         return

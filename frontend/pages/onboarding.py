@@ -116,7 +116,7 @@ def render():
     if st.button(
         "Continue →",
         type="primary",
-        use_container_width=True,
+        width="stretch",
     ):
         if not goal.strip():
             st.warning(

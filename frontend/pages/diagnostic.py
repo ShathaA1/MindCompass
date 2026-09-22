@@ -132,7 +132,7 @@ def render_path_selection(token):
                 button_label,
                 key=f"choose_{path_key}",
                 type="primary" if is_selected else "secondary",
-                use_container_width=True,
+                width="stretch",
             ):
                 st.session_state["selected_path"] = path_key
                 st.rerun()
@@ -147,7 +147,7 @@ def render_path_selection(token):
         if st.button(
             "Continue to Diagnostic →",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         ):
             start_selected_diagnostic(
                 token=token,
@@ -386,7 +386,7 @@ def render_diagnostic_stage():
                         if is_selected
                         else "secondary"
                     ),
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     # Save the selected answer for this question.
                     st.session_state[
@@ -412,7 +412,7 @@ def render_diagnostic_stage():
         if current_index > 0:
             if st.button(
                 "← Previous",
-                use_container_width=True,
+                width="stretch",
             ):
                 st.session_state[
                     "diagnostic_question_index"
@@ -428,7 +428,7 @@ def render_diagnostic_stage():
             if st.button(
                 "Next →",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 disabled=selected_answer is None,
             ):
                 st.session_state[
@@ -442,7 +442,7 @@ def render_diagnostic_stage():
             if st.button(
                 "Submit Diagnostic",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 disabled=selected_answer is None,
             ):
                 submit_diagnostic_answers(
