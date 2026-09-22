@@ -36,7 +36,7 @@ def generate_quiz(
     topics: list[dict],
     context: str,
     student_level: str,
-    num_questions: int = 5,
+    num_questions: int = 8,
     assessment_type: str = "diagnostic",
 ) -> str:
     """

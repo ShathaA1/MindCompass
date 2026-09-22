@@ -549,8 +549,8 @@ def prepare_teaching_inputs(
     state: TutorState
 ) -> dict:
     """
-    Prepare the learner and topic information required
-    for generating a personalized explanation.
+    Prepare the learner, topic, and user request
+    required for generating a personalized explanation.
     """
 
     # Load the learner's current topic and context.
@@ -561,6 +561,13 @@ def prepare_teaching_inputs(
     learner_context = state.get(
         "learner_context",
         {}
+    )
+
+    # Load the learner's current request so RAG
+    # can retrieve material relevant to the question.
+    user_message = state.get(
+        "user_message",
+        ""
     )
 
     # Teaching requires an active topic.
@@ -587,7 +594,10 @@ def prepare_teaching_inputs(
         "topic_id": topic_id,
         "topic_name": topic_name,
         "student_level": student_level,
+        "user_message": user_message,
     }
+
+
 
 def teach_node(
     state: TutorState
@@ -609,11 +619,13 @@ def teach_node(
             )
         }
 
-    # Retrieve relevant learning material from
-    # the RAG knowledge base for the current topic.
+    # Retrieve learning material from the current topic
+    # using the learner's specific request as the
+    # semantic search query.
     context = retrieve_topic_context(
         topic_id=teaching_inputs["topic_id"],
-        topic_name=teaching_inputs["topic_name"]
+        topic_name=teaching_inputs["topic_name"],
+        retrieval_query=teaching_inputs["user_message"]
     )
 
     if not context:

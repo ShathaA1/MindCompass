@@ -779,7 +779,7 @@ def test_tutor_graph_end_to_end(monkeypatch):
     # does not call the real embedding API.
     monkeypatch.setattr(
         "app.agent.graph.retrieve_topic_context",
-        lambda topic_id, topic_name: (
+        lambda topic_id, topic_name, retrieval_query=None: (
             "AI agents can reason, use tools, "
             "and perform actions to achieve goals."
         )
@@ -861,7 +861,7 @@ def test_tutor_graph_loads_conversation_history(monkeypatch):
     # does not call the real embedding API.
     monkeypatch.setattr(
         "app.agent.graph.retrieve_topic_context",
-        lambda topic_id, topic_name: (
+        lambda topic_id, topic_name, retrieval_query=None: (
             "AI agents can reason, use tools, "
             "and perform actions to achieve goals."
         )
@@ -1060,7 +1060,7 @@ def test_tutor_graph_routes_to_teach(monkeypatch):
     # does not call the real embedding API.
     monkeypatch.setattr(
         "app.agent.graph.retrieve_topic_context",
-        lambda topic_id, topic_name: (
+        lambda topic_id, topic_name, retrieval_query=None: (
             "AI agents can reason, use tools, "
             "and perform actions to achieve goals."
         )
@@ -2193,7 +2193,7 @@ def test_route_assessment_to_submit():
 def test_prepare_teaching_inputs():
     """
     Teaching inputs should be prepared from
-    the current topic and learner context.
+    the current topic, learner context, and user request.
     """
 
     state = {
@@ -2205,6 +2205,9 @@ def test_prepare_teaching_inputs():
             "initial_level": "beginner",
             "current_level": "intermediate",
         },
+        "user_message": (
+            "Explain how an AI agent uses tools."
+        ),
     }
 
     result = prepare_teaching_inputs(state)
@@ -2213,6 +2216,9 @@ def test_prepare_teaching_inputs():
         "topic_id": 12,
         "topic_name": "Building Your First Agent",
         "student_level": "intermediate",
+        "user_message": (
+            "Explain how an AI agent uses tools."
+        ),
     }
 
 
@@ -2238,27 +2244,54 @@ def test_teach_node_generates_explanation(
     monkeypatch
 ):
     """
-    The teaching node should retrieve topic context
-    and generate a personalized explanation.
+    The teaching node should use the learner's
+    specific request for RAG retrieval and generate
+    a personalized explanation.
     """
+
+    retrieved_query = {}
 
     # Mock RAG retrieval so the test does not
     # require embeddings or a real vector database.
-    monkeypatch.setattr(
-        "app.agent.graph.retrieve_topic_context",
-        lambda topic_id, topic_name: (
+    def mock_retrieve_topic_context(
+        topic_id,
+        topic_name,
+        retrieval_query=None
+    ):
+        # Capture the retrieval inputs so the test
+        # can verify the correct topic and query.
+        retrieved_query["topic_id"] = topic_id
+        retrieved_query["topic_name"] = topic_name
+        retrieved_query["retrieval_query"] = (
+            retrieval_query
+        )
+
+        return (
             "AI agents can reason, use tools, "
             "and perform actions to achieve goals."
         )
+
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        mock_retrieve_topic_context
     )
 
     # Create a fake explanation tool so the test
     # does not call the real language model.
     class FakeExplainTool:
         def invoke(self, inputs):
-            assert inputs["topic"] == "Building Your First Agent"
-            assert inputs["student_level"] == "intermediate"
-            assert "AI agents can reason" in inputs["context"]
+            assert (
+                inputs["topic"]
+                == "Building Your First Agent"
+            )
+            assert (
+                inputs["student_level"]
+                == "intermediate"
+            )
+            assert (
+                "AI agents can reason"
+                in inputs["context"]
+            )
 
             return (
                 "An AI agent is a system that can "
@@ -2280,10 +2313,30 @@ def test_teach_node_generates_explanation(
         "learner_context": {
             "current_level": "intermediate",
         },
+        "user_message": (
+            "Explain how an AI agent uses tools."
+        ),
     }
 
     result = teach_node(state)
 
+    # Verify that retrieval remains restricted
+    # to the learner's current topic.
+    assert retrieved_query["topic_id"] == 12
+
+    assert (
+        retrieved_query["topic_name"]
+        == "Building Your First Agent"
+    )
+
+    # Verify that the learner's actual request
+    # is used as the semantic retrieval query.
+    assert (
+        retrieved_query["retrieval_query"]
+        == "Explain how an AI agent uses tools."
+    )
+
+    # Verify the final teaching response.
     assert result["response"] == (
         "An AI agent is a system that can "
         "reason and take actions toward a goal."
@@ -2302,7 +2355,7 @@ def test_teach_node_stops_without_rag_context(
     # learning material in the knowledge base.
     monkeypatch.setattr(
         "app.agent.graph.retrieve_topic_context",
-        lambda topic_id, topic_name: ""
+        lambda topic_id, topic_name, retrieval_query=None: ""
     )
 
     state = {

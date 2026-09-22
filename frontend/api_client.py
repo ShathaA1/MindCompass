@@ -162,3 +162,42 @@ def submit_diagnostic(
         },
         timeout=REQUEST_TIMEOUT,
     )
+
+
+def create_chat_session(
+    token,
+    session_name="Tutor Session"
+):
+    """
+    Create a new Tutor chat session for
+    the authenticated learner.
+    """
+
+    return requests.post(
+        f"{BASE_URL}/chat/sessions",
+        headers=_headers(token),
+        json={
+            "session_name": session_name,
+        },
+        timeout=REQUEST_TIMEOUT,
+    )
+
+
+def send_chat_message(
+    token,
+    session_id,
+    message
+):
+    """
+    Send a learner message to the Tutor Agent
+    and return the generated Tutor response.
+    """
+
+    return requests.post(
+        f"{BASE_URL}/chat/{session_id}/messages",
+        headers=_headers(token),
+        json={
+            "message": message,
+        },
+        timeout=REQUEST_TIMEOUT,
+    )

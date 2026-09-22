@@ -34,6 +34,12 @@ Instructions:
 - Questions may come from different topics.
 - For placement assessments, distribute questions across the provided topics when possible.
 - Do not invent topic_ids.
+- The topic_id is internal metadata used only to associate each question with the correct topic.
+- NEVER ask the learner about topic_id values, topic numbers, internal identifiers, or mappings between topic IDs and topic names.
+- NEVER create questions about the structure or metadata of the provided Topics section.
+- The topic name and topic_id are labels for question classification only, not learning content.
+- Every question must test the learner's knowledge of the actual subject matter found in the Learning Context.
+- Use the Learning Context as the source of educational content for the questions.
 - Return a JSON object containing a "questions" field.
 - The "questions" field must contain an array of questions.
 - Do not return the questions array by itself.
@@ -47,6 +53,16 @@ If the assessment type is "diagnostic":
 - Use the student's current level only as a reference for appropriate wording, not to make all questions the same difficulty.
 - Every question must include a difficulty field.
 - The difficulty must be exactly one of: "beginner", "intermediate", or "advanced".
+- Assess the learner's actual prerequisite knowledge and understanding of the provided subjects.
+- Focus on concepts, principles, terminology, and practical understanding from the Learning Context.
+- Do not test whether the learner knows how topics are represented, numbered, or organized in the system.
+- Focus on foundational prerequisite knowledge that is important for determining the learner's readiness in each provided topic.
+- Prefer broad, representative prerequisite concepts over narrow, obscure, or library-specific details.
+- For Python diagnostic questions, prioritize core concepts such as variables, data types, collections, control flow, functions, and basic Python behavior.
+- For Machine Learning diagnostic questions, prioritize core concepts such as supervised vs. unsupervised learning, classification, regression, clustering, features, labels, training, and evaluation.
+- Avoid questions about obscure standard-library behavior, implementation trivia, document structure, headings, topic lists, or memorizing how concepts are categorized in the source material.
+- Questions should measure conceptual understanding and practical prerequisite knowledge, not recall of wording from the learning material.
+- Do not use phrases such as "according to the provided material", "according to the topics", or similar references to the source documents.
 
 For other assessment types:
 - Generate questions appropriate for the student's level.
