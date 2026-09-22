@@ -123,6 +123,7 @@ def apply_global_styles():
             margin-bottom: 8px;
         }
 
+
         /* =========================================================
            Sidebar
            ========================================================= */
@@ -420,6 +421,175 @@ def apply_global_styles():
             color: #3B6B99;
         }
 
+
+        /* ---------- Dashboard ---------- */
+
+        .mc-dashboard-path,
+        .mc-dashboard-panel {
+            background: #FFFFFF;
+            border: 1px solid #DCECFB;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(54, 90, 125, 0.06);
+        }
+
+        .mc-dashboard-path {
+            padding: 24px 28px;
+            margin-top: 28px;
+            margin-bottom: 24px;
+        }
+
+        .mc-dashboard-panel {
+            padding: 22px 24px;
+            margin-bottom: 12px;
+        }
+
+        .mc-dashboard-path-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        .mc-dashboard-label {
+            color: #7B9AB7;
+            font-size: 0.76rem;
+            font-weight: 600;
+            letter-spacing: 0.07em;
+            margin-bottom: 7px;
+        }
+
+        .mc-dashboard-path-title {
+            color: #2F5F8F;
+            font-size: 1.35rem;
+            font-weight: 650;
+            line-height: 1.3;
+        }
+
+        .mc-dashboard-status {
+            background: #EDF6FF;
+            color: #5C8DB8;
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 0.72rem;
+            font-weight: 600;
+        }
+
+        .mc-dashboard-progress-header,
+        .mc-dashboard-mastery-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #4E6F8E;
+            font-size: 0.9rem;
+            margin-bottom: 8px;
+        }
+
+        .mc-dashboard-progress-track {
+            width: 100%;
+            height: 8px;
+            background: #EDF4FA;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .mc-dashboard-progress-fill {
+            height: 100%;
+            background: #78B9F7;
+            border-radius: 999px;
+        }
+
+        .mc-dashboard-progress-caption {
+            color: #8AA2B8;
+            font-size: 0.82rem;
+            margin-top: 8px;
+        }
+
+        .mc-dashboard-topic-title {
+            color: #2F5F8F;
+            font-size: 1.25rem;
+            font-weight: 650;
+            line-height: 1.35;
+            margin: 8px 0 16px;
+        }
+
+        .mc-dashboard-muted {
+            color: #8AA2B8;
+            font-size: 0.86rem;
+        }
+
+        .mc-dashboard-action {
+            display: inline-block;
+            margin-top: 6px;
+            color: #4E8FC7;
+            background: #EDF6FF;
+            border-radius: 7px;
+            padding: 5px 10px;
+            font-size: 0.88rem;
+            font-weight: 600;
+        }
+
+        .mc-dashboard-stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #EDF3F8;
+            color: #66839F;
+            font-size: 0.9rem;
+        }
+
+        .mc-dashboard-stat-row:last-child {
+            border-bottom: none;
+        }
+
+        .mc-dashboard-stat-row strong {
+            color: #365A7D;
+            font-size: 0.98rem;
+            font-weight: 650;
+        }
+
+        .mc-dashboard-section-title {
+            color: #2F5F8F;
+            font-size: 1.35rem;
+            font-weight: 650;
+            margin-top: 30px;
+            margin-bottom: 14px;
+        }
+
+        .mc-dashboard-mastery-panel {
+            padding-top: 8px;
+            padding-bottom: 8px;
+        }
+
+        .mc-dashboard-mastery-item {
+            padding: 14px 0;
+        }
+
+        .mc-dashboard-mastery-header {
+            color: #527492;
+        }
+
+        .mc-dashboard-mastery-header strong {
+            color: #365A7D;
+            font-size: 0.9rem;
+        }
+
+        .mc-dashboard-weak-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .mc-dashboard-weak-area {
+            display: inline-block;
+            background: #F2F7FC;
+            color: #5C7893;
+            border: 1px solid #DCEAF6;
+            border-radius: 999px;
+            padding: 6px 11px;
+            font-size: 0.84rem;
+        }
 
         /* =========================================================
            Metric Cards

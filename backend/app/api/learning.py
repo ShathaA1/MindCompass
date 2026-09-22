@@ -26,8 +26,11 @@ def dashboard(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    """Return a personalized summary of the learner's progress."""
+
     user_id = int(current_user["sub"])
 
+    # Load the learner profile.
     profile = (
         db.query(LearnerProfile)
         .filter(LearnerProfile.user_id == user_id)
@@ -40,6 +43,7 @@ def dashboard(
             detail="Learner profile not found",
         )
 
+    # Load the learner's most recent learning path.
     learning_path = (
         db.query(LearningPath)
         .filter(LearningPath.user_id == user_id)
@@ -47,20 +51,123 @@ def dashboard(
         .first()
     )
 
-    masteries = (
-        db.query(TopicMastery)
+    # Load all mastery records with their topic information.
+    mastery_records = (
+        db.query(TopicMastery, Topic)
+        .join(
+            Topic,
+            TopicMastery.topic_id == Topic.topic_id,
+        )
         .filter(TopicMastery.user_id == user_id)
         .all()
     )
+
+    # Prepare mastery information for the dashboard.
+    topic_masteries = [
+        {
+            "topic_id": topic.topic_id,
+            "topic_name": topic.name,
+            "mastery_score": mastery.mastery_score,
+            "weak_areas": mastery.weak_areas,
+            "last_assessed_at": mastery.last_assessed_at,
+        }
+        for mastery, topic in mastery_records
+    ]
+
+    # Calculate the learner's average mastery score.
+    average_mastery = (
+        round(
+            sum(
+                mastery.mastery_score
+                for mastery, _ in mastery_records
+            ) / len(mastery_records),
+            1,
+        )
+        if mastery_records
+        else None
+    )
+
+    # Collect unique weak areas across assessed topics.
+    weak_areas = []
+
+    for mastery, _ in mastery_records:
+        if isinstance(mastery.weak_areas, list):
+            for area in mastery.weak_areas:
+                if area not in weak_areas:
+                    weak_areas.append(area)
+
+    # Default learning-path values for learners without a path yet.
+    total_topics = 0
+    completed_topics = 0
+    progress_percentage = 0
+    current_topic = None
+    recommended_action = None
+
+    if learning_path:
+        # Load the ordered topics in the current learning path.
+        path_items = (
+            db.query(LearningPathItem, Topic)
+            .join(
+                Topic,
+                LearningPathItem.topic_id == Topic.topic_id,
+            )
+            .filter(
+                LearningPathItem.learning_path_id
+                == learning_path.learning_path_id
+            )
+            .order_by(LearningPathItem.position.asc())
+            .all()
+        )
+
+        total_topics = len(path_items)
+
+        completed_topics = sum(
+            1
+            for item, _ in path_items
+            if item.status == "completed"
+        )
+
+        if total_topics > 0:
+            progress_percentage = round(
+                (completed_topics / total_topics) * 100,
+                1,
+            )
+
+        # The current topic is the first topic not yet completed.
+        for item, topic in path_items:
+            if item.status != "completed":
+                current_topic = {
+                    "topic_id": topic.topic_id,
+                    "topic_name": topic.name,
+                    "position": item.position,
+                    "status": item.status,
+                }
+
+                recommended_action = item.recommended_action
+                break
 
     return {
         "goal": profile.goal,
         "current_level": profile.current_level,
         "weekly_hours": profile.weekly_hours,
         "learning_path": (
-            learning_path.name if learning_path else None
+            {
+                "learning_path_id": learning_path.learning_path_id,
+                "name": learning_path.name,
+                "status": learning_path.status,
+            }
+            if learning_path
+            else None
         ),
-        "topics_assessed": len(masteries),
+        "total_topics": total_topics,
+        "completed_topics": completed_topics,
+        "progress_percentage": progress_percentage,
+        "current_topic": current_topic,
+        "recommended_action": recommended_action,
+        "topics_assessed": len(mastery_records),
+        "average_mastery": average_mastery,
+        "topic_masteries": topic_masteries,
+        "weak_areas": weak_areas,
     }
 
 

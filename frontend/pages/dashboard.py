@@ -1,14 +1,12 @@
-"""Displays the personalized path, progress, and recommended next step."""
+"""Displays the learner's personalized progress and next learning step."""
 
 import streamlit as st
 
-from api_client import get_dashboard, get_learning_path
+from api_client import get_dashboard
 
 
 def render():
-    """
-    Display the learner dashboard.
-    """
+    """Display the learner dashboard."""
 
     # ---------- Page introduction ----------
 
@@ -25,18 +23,18 @@ def render():
     )
 
     st.markdown(
-        """
-        <div class="mc-page-description">
-            Track your learning profile, current path,
-            and assessment progress.
-        </div>
-        """,
+        (
+            '<div class="mc-page-description">'
+            "Continue where you left off and track your progress."
+            "</div>"
+        ),
         unsafe_allow_html=True,
     )
 
     token = st.session_state["token"]
 
     try:
+        # Load the personalized dashboard summary.
         response = get_dashboard(token)
 
         if response.status_code != 200:
@@ -45,101 +43,268 @@ def render():
 
         data = response.json()
 
-        # ---------- Learning profile ----------
+        learning_path = data.get("learning_path")
 
-        st.subheader("Learning Profile")
-
-        level_col, hours_col, assessed_col = st.columns(3)
-
-        with level_col:
-            st.metric(
-                "Current Level",
-                str(data.get("current_level", "-")).title(),
-            )
-
-        with hours_col:
-            st.metric(
-                "Weekly Hours",
-                data.get("weekly_hours", "-"),
-            )
-
-        with assessed_col:
-            st.metric(
-                "Topics Assessed",
-                data.get("topics_assessed", 0),
-            )
-
-        st.markdown(
-            f"""
-            <div class="mc-card">
-                <div class="mc-card-title">
-                    Learning Goal
-                </div>
-                <div class="mc-card-text">
-                    {data.get("goal", "-")}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        # ---------- Personalized learning path ----------
-
-        st.subheader("Learning Path")
-
-        path_response = get_learning_path(token)
-
-        if path_response.status_code != 200:
-            st.error(
-                "Unable to load learning path."
-            )
-            return
-
-        path_data = path_response.json()
-
-        if path_data.get("learning_path") is None:
+        if learning_path is None:
             st.info(
                 "Your personalized learning path "
                 "has not been generated yet."
             )
             return
 
-        learning_path = path_data["learning_path"]
+        # ---------- Prepare dashboard data ----------
+
+        path_name = learning_path.get(
+            "name",
+            "Personalized Learning Path",
+        )
+
+        path_status = learning_path.get(
+            "status",
+            "active",
+        )
+
+        progress = data.get(
+            "progress_percentage",
+            0,
+        )
+
+        completed_topics = data.get(
+            "completed_topics",
+            0,
+        )
+
+        total_topics = data.get(
+            "total_topics",
+            0,
+        )
+
+        topics_assessed = data.get(
+            "topics_assessed",
+            0,
+        )
+
+        current_topic = data.get("current_topic")
+        average_mastery = data.get("average_mastery")
+        recommended_action = data.get("recommended_action")
+
+        topic_masteries = data.get(
+            "topic_masteries",
+            [],
+        )
+
+        weak_areas = data.get(
+            "weak_areas",
+            [],
+        )
+
+        current_topic_name = (
+            current_topic.get(
+                "topic_name",
+                "Current Topic",
+            )
+            if current_topic
+            else "Learning Path Completed"
+        )
+
+        action_label = (
+            recommended_action.title()
+            if recommended_action
+            else "Continue"
+        )
+
+        mastery_label = (
+            f"{average_mastery}%"
+            if average_mastery is not None
+            else "-"
+        )
+
+        # ---------- Current learning path ----------
 
         st.markdown(
-            f"""
-            <div class="mc-card">
-                <div class="mc-card-title">
-                    {learning_path.get(
-                        "name",
-                        "Personalized Learning Path",
-                    )}
-                </div>
-                <div class="mc-card-text">
-                    Your current personalized learning path.
-                </div>
-            </div>
-            """,
+            (
+                '<div class="mc-dashboard-path">'
+                '<div class="mc-dashboard-path-header">'
+                '<div>'
+                '<div class="mc-dashboard-label">'
+                "CURRENT LEARNING PATH"
+                "</div>"
+                '<div class="mc-dashboard-path-title">'
+                f"{path_name}"
+                "</div>"
+                "</div>"
+                '<div class="mc-dashboard-status">'
+                f"{path_status.upper()}"
+                "</div>"
+                "</div>"
+                '<div class="mc-dashboard-progress-header">'
+                "<span>Progress</span>"
+                f"<span>{progress}%</span>"
+                "</div>"
+                '<div class="mc-dashboard-progress-track">'
+                '<div class="mc-dashboard-progress-fill" '
+                f'style="width: {progress}%;"></div>'
+                "</div>"
+                '<div class="mc-dashboard-progress-caption">'
+                f"{completed_topics} of {total_topics} "
+                "topics completed"
+                "</div>"
+                "</div>"
+            ),
             unsafe_allow_html=True,
         )
 
-        items = path_data.get("items", [])
+        # ---------- Continue learning and progress ----------
 
-        for item in items:
-            position = item.get("position", "")
-            topic_name = item.get(
-                "topic_name",
-                "Topic",
+        left_col, right_col = st.columns(
+            [1.4, 1],
+            gap="large",
+        )
+
+        with left_col:
+            st.markdown(
+                (
+                    '<div class="mc-dashboard-panel">'
+                    '<div class="mc-dashboard-label">'
+                    "CONTINUE LEARNING"
+                    "</div>"
+                    '<div class="mc-dashboard-topic-title">'
+                    f"{current_topic_name}"
+                    "</div>"
+                    '<div class="mc-dashboard-muted">'
+                    "Recommended next action"
+                    "</div>"
+                    '<div class="mc-dashboard-action">'
+                    f"{action_label}"
+                    "</div>"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+
+            if current_topic:
+                if st.button(
+                    "Continue Learning",
+                    type="primary",
+                    width="stretch",
+                    key="dashboard_continue",
+                ):
+                    st.session_state["page"] = "Tutor"
+                    st.rerun()
+
+        with right_col:
+            st.markdown(
+                (
+                    '<div class="mc-dashboard-panel">'
+                    '<div class="mc-dashboard-label">'
+                    "YOUR PROGRESS"
+                    "</div>"
+                    '<div class="mc-dashboard-stat-row">'
+                    "<span>Average Mastery</span>"
+                    f"<strong>{mastery_label}</strong>"
+                    "</div>"
+                    '<div class="mc-dashboard-stat-row">'
+                    "<span>Topics Completed</span>"
+                    f"<strong>{completed_topics}/{total_topics}</strong>"
+                    "</div>"
+                    '<div class="mc-dashboard-stat-row">'
+                    "<span>Topics Assessed</span>"
+                    f"<strong>{topics_assessed}</strong>"
+                    "</div>"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+
+        # ---------- Topic mastery ----------
+
+        st.markdown(
+            '<div class="mc-dashboard-section-title">'
+            "Topic Mastery"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        if topic_masteries:
+            mastery_html = (
+                '<div class="mc-dashboard-panel '
+                'mc-dashboard-mastery-panel">'
+            )
+
+            for mastery in topic_masteries:
+                topic_name = mastery.get(
+                    "topic_name",
+                    "Topic",
+                )
+
+                score = mastery.get(
+                    "mastery_score",
+                    0,
+                )
+
+                mastery_html += (
+                    '<div class="mc-dashboard-mastery-item">'
+                    '<div class="mc-dashboard-mastery-header">'
+                    f"<span>{topic_name}</span>"
+                    f"<strong>{score:g}%</strong>"
+                    "</div>"
+                    '<div class="mc-dashboard-progress-track">'
+                    '<div class="mc-dashboard-progress-fill" '
+                    f'style="width: {score}%;"></div>'
+                    "</div>"
+                    "</div>"
+                )
+
+            mastery_html += "</div>"
+
+            st.markdown(
+                mastery_html,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info(
+                "Complete an assessment to see "
+                "your topic mastery."
+            )
+
+        # ---------- Areas to improve ----------
+
+        st.markdown(
+            '<div class="mc-dashboard-section-title">'
+            "Areas to Improve"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        if weak_areas:
+            weak_areas_html = "".join(
+                (
+                    '<span class="mc-dashboard-weak-area">'
+                    f"{area}"
+                    "</span>"
+                )
+                for area in weak_areas
             )
 
             st.markdown(
-                f"""
-                <div class="mc-card">
-                    <div class="mc-card-title">
-                        {position}. {topic_name}
-                    </div>
-                </div>
-                """,
+                (
+                    '<div class="mc-dashboard-panel">'
+                    '<div class="mc-dashboard-weak-list">'
+                    f"{weak_areas_html}"
+                    "</div>"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                (
+                    '<div class="mc-dashboard-panel">'
+                    '<div class="mc-dashboard-muted">'
+                    "No weak areas identified yet."
+                    "</div>"
+                    "</div>"
+                ),
                 unsafe_allow_html=True,
             )
 

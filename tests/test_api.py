@@ -218,3 +218,72 @@ def test_submit_initial_diagnostic(monkeypatch):
         # Always remove the authentication override
         # so it does not affect other API tests.
         app.dependency_overrides.clear()
+
+def test_dashboard_summary():
+    """
+    Test that the dashboard endpoint returns:
+    1. The learner's active learning path.
+    2. Learning path progress.
+    3. The current topic and recommended action.
+    4. Mastery and weak-area information.
+    """
+
+    # Replace JWT authentication with a controlled test user.
+    app.dependency_overrides[get_current_user] = (
+        fake_current_user
+    )
+
+    try:
+        response = client.get(
+            "/learning/dashboard"
+        )
+
+        assert response.status_code == 200
+
+        data = response.json()
+
+        # Verify the learner profile summary.
+        assert "goal" in data
+        assert "current_level" in data
+        assert "weekly_hours" in data
+
+        # Verify the personalized learning path.
+        assert data["learning_path"] is not None
+        assert (
+            data["learning_path"]["name"]
+            == "Agentic AI Learning Path"
+        )
+        assert (
+            data["learning_path"]["status"]
+            == "active"
+        )
+
+        # Verify learning path progress.
+        assert data["total_topics"] == 3
+        assert data["completed_topics"] == 2
+        assert data["progress_percentage"] == 66.7
+
+        # Verify the current topic and next action.
+        assert data["current_topic"] is not None
+        assert (
+            data["current_topic"]["topic_name"]
+            == "Introduction to Agentic AI"
+        )
+        assert data["recommended_action"] == "explain"
+
+        # Verify mastery information is available.
+        assert data["topics_assessed"] >= 1
+        assert data["average_mastery"] is not None
+        assert isinstance(
+            data["topic_masteries"],
+            list,
+        )
+        assert isinstance(
+            data["weak_areas"],
+            list,
+        )
+
+    finally:
+        # Always remove the authentication override
+        # so it does not affect other API tests.
+        app.dependency_overrides.clear()
