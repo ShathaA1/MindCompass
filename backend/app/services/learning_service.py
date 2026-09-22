@@ -94,6 +94,7 @@ def get_diagnostic_topics(
         for topic_id in diagnostic_topic_ids
     ]
 
+
 def get_active_learning_path(
     db: Session,
     user_id: int
@@ -136,10 +137,14 @@ def are_prerequisites_completed(
 ) -> bool:
     """
     Check whether all prerequisites for a topic
-    are completed in the learner's current learning path.
+    are satisfied in the learner's personalized learning path.
     """
 
-    # Get all prerequisite topic IDs required for this topic
+    # Topics 1-3 are structural/diagnostic topics.
+    # They are not included as study items in personalized paths.
+    structural_topic_ids = {1, 2, 3}
+
+    # Get all prerequisite topic IDs required for this topic.
     prerequisites = (
         db.query(TopicPrerequisite)
         .filter(
@@ -148,37 +153,41 @@ def are_prerequisites_completed(
         .all()
     )
 
-    # If the topic has no prerequisites,
-    # the learner can study it immediately
+    # A topic with no prerequisites can be studied immediately.
     if not prerequisites:
         return True
 
-    # Check every prerequisite one by one
+    # Check every prerequisite one by one.
     for prerequisite in prerequisites:
+        prerequisite_topic_id = prerequisite.prerequisite_topic_id
 
-        # Find the prerequisite topic
-        # inside the same learning path
+        # Structural prerequisites are handled by the initial
+        # diagnostic and personalized path construction.
+        if prerequisite_topic_id in structural_topic_ids:
+            continue
+
+        # For real learning-content prerequisites,
+        # the prerequisite must exist in the same learning path.
         prerequisite_item = (
             db.query(LearningPathItem)
             .filter(
                 LearningPathItem.learning_path_id == learning_path_id,
-                LearningPathItem.topic_id
-                == prerequisite.prerequisite_topic_id
+                LearningPathItem.topic_id == prerequisite_topic_id
             )
             .first()
         )
 
-        # If the prerequisite is missing from the learning path,
-        # or it has not been completed,
-        # the topic is not ready yet
+        # A real learning prerequisite must exist
+        # and must already be completed.
         if (
             not prerequisite_item
             or prerequisite_item.status != "completed"
         ):
             return False
 
-    # All prerequisites were found and completed
+    # All prerequisites are satisfied.
     return True
+
 
 
 def select_next_topic(
@@ -347,6 +356,90 @@ def get_required_topic_ids(
     return required_topic_ids
 
 
+def get_personalized_topic_ids(
+    db: Session,
+    user_id: int,
+    target_topic_id: int
+) -> list[int]:
+    """
+    Build the learner's personalized study-topic list
+    based on diagnostic mastery and available learning content.
+    """
+
+    # Topic IDs used only to store diagnostic mastery.
+    python_diagnostic_topic_id = 1
+    ml_diagnostic_topic_id = 2
+
+    # RAG-backed reference materials used to fill
+    # prerequisite knowledge gaps.
+    python_material_topic_id = 27
+    ml_material_topic_id = 26
+
+    # Topics 1-3 are diagnostic/structural records
+    # and should not become study items.
+    non_learning_topic_ids = {1, 2, 3}
+
+    personalized_topic_ids = []
+
+    # Check Python readiness from the initial diagnostic.
+    python_mastery = get_topic_mastery(
+        db=db,
+        user_id=user_id,
+        topic_id=python_diagnostic_topic_id
+    )
+
+    python_score = (
+        python_mastery.get("mastery_score")
+        if python_mastery
+        else None
+    )
+
+    # Add the actual Python learning material
+    # only when the learner has a Python gap.
+    if python_score is None or python_score < 85:
+        personalized_topic_ids.append(
+            python_material_topic_id
+        )
+
+    # Check Machine Learning readiness
+    # from the initial diagnostic.
+    ml_mastery = get_topic_mastery(
+        db=db,
+        user_id=user_id,
+        topic_id=ml_diagnostic_topic_id
+    )
+
+    ml_score = (
+        ml_mastery.get("mastery_score")
+        if ml_mastery
+        else None
+    )
+
+    # Add the actual ML learning material
+    # only when the learner has an ML gap.
+    if ml_score is None or ml_score < 85:
+        personalized_topic_ids.append(
+            ml_material_topic_id
+        )
+
+    # Load the curriculum required to reach
+    # the selected target topic.
+    required_topic_ids = get_required_topic_ids(
+        db=db,
+        topic_id=target_topic_id
+    )
+
+    # Add only real learning-content topics.
+    # Diagnostic/structural topics are excluded.
+    personalized_topic_ids.extend(
+        topic_id
+        for topic_id in required_topic_ids
+        if topic_id not in non_learning_topic_ids
+    )
+
+    return personalized_topic_ids
+
+
 def create_learning_path(
     db: Session,
     user_id: int,
@@ -359,11 +452,12 @@ def create_learning_path(
     based on the target topic and its prerequisites.
     """
 
-    # Get all topics required to reach the target topic
-    # in the correct learning order.
-    required_topic_ids = get_required_topic_ids(
+    # Build a personalized list of study topics based on
+    # the learner's diagnostic mastery and curriculum target.
+    required_topic_ids = get_personalized_topic_ids(
         db=db,
-        topic_id=target_topic_id
+        user_id=user_id,
+        target_topic_id=target_topic_id
     )
 
     # Create the learner's new active learning path.

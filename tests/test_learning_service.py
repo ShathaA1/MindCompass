@@ -7,11 +7,14 @@ from app.services.learning_service import (
     are_prerequisites_completed,
     get_topic_mastery,
     get_required_topic_ids,
+    get_personalized_topic_ids,
     create_learning_path,
     get_initial_topic_status,
     update_learning_path,
     get_topic_recommended_action,
     complete_learning_path,
+    get_available_learning_path,
+    get_diagnostic_topics,
 )
 
 from app.database.models import (
@@ -23,10 +26,6 @@ from app.database.models import (
 
 import pytest
 
-from app.services.learning_service import (
-    get_available_learning_path,
-    get_diagnostic_topics,
-)
 
 def test_get_active_learning_path():
     """
@@ -145,6 +144,43 @@ def test_prerequisites_completed_for_agentic_ai():
         db.close()
 
 
+def test_structural_prerequisite_does_not_block_learning_content():
+    """
+    Test that a structural prerequisite does not block
+    a real learning-content topic in a personalized path.
+    """
+
+    with SessionLocal() as db:
+        # Topic 4 requires Topic 3.
+        # Topic 3 is structural and does not need to exist
+        # as a LearningPathItem in the personalized path.
+        result = are_prerequisites_completed(
+            db=db,
+            learning_path_id=1,
+            topic_id=4
+        )
+
+        assert result is True
+
+
+def test_real_learning_prerequisite_must_be_completed():
+    """
+    Test that real learning-content prerequisites
+    still enforce the curriculum sequence.
+    """
+
+    with SessionLocal() as db:
+        # Topic 5 requires Topic 4.
+        # Unlike structural topics 1-3, Topic 4 is real
+        # learning content and must exist and be completed.
+        result = are_prerequisites_completed(
+            db=db,
+            learning_path_id=1,
+            topic_id=5
+        )
+
+        assert result is False
+
 def test_get_topic_mastery():
     """
     Test that the learner's mastery information
@@ -251,26 +287,22 @@ def test_get_required_topic_ids_without_prerequisites():
         assert topic_ids == [1]
 
 
-def test_create_learning_path():
+def test_create_personalized_agentic_ai_learning_path():
     """
-    Test creating a complete learning path
-    from a target topic and its prerequisites.
+    Test that the Agentic AI learning path is personalized
+    based on the learner's diagnostic mastery.
     """
 
-    # Open a database session for the test.
     with SessionLocal() as db:
-
-        # Generate a unique email for every test run
-        # to avoid conflicts with previous test data.
+        # Generate a unique email for every test run.
         unique_email = (
-            f"learningpath.test.{uuid.uuid4().hex}"
+            f"personalized.path.{uuid.uuid4().hex}"
             "@mindcompass.local"
         )
 
-        # Create a temporary learner
-        # so existing test data is not modified.
+        # Create a temporary learner.
         test_user = User(
-            name="Learning Path Test User",
+            name="Personalized Path Test User",
             email=unique_email,
             password_hash="test_hash",
             role="learner"
@@ -280,37 +312,65 @@ def test_create_learning_path():
         db.commit()
         db.refresh(test_user)
 
-        # Store the user ID separately so cleanup
-        # can still use it if the session fails later.
         test_user_id = test_user.user_id
+        learning_path_id = None
 
         try:
-            # Create an Agentic AI learning path.
+            # Simulate the initial diagnostic results:
+            # Python is mastered, while Machine Learning
+            # requires additional learning support.
+            db.add_all(
+                [
+                    TopicMastery(
+                        user_id=test_user_id,
+                        topic_id=1,
+                        mastery_score=90,
+                        weak_areas=[]
+                    ),
+                    TopicMastery(
+                        user_id=test_user_id,
+                        topic_id=2,
+                        mastery_score=80,
+                        weak_areas=["model evaluation"]
+                    ),
+                ]
+            )
+            db.commit()
+
+            # Create the personalized Agentic AI learning path.
             result = create_learning_path(
                 db=db,
                 user_id=test_user_id,
-                target_topic_id=3,
+                target_topic_id=25,
                 path_name="Agentic AI Test Path",
                 goal="Learn Agentic AI"
             )
 
-            # Verify the main learning path information.
+            learning_path_id = result["learning_path_id"]
+
+            # Python does not need remediation because
+            # its diagnostic mastery is at least 85.
+            #
+            # Machine Learning does need remediation,
+            # so Topic 26 should be added before the
+            # Agentic AI curriculum.
+            expected_topic_ids = [
+                26,
+                *range(4, 26),
+            ]
+
             assert result["user_id"] == test_user_id
             assert result["name"] == "Agentic AI Test Path"
             assert result["goal"] == "Learn Agentic AI"
             assert result["status"] == "active"
+            assert result["topic_ids"] == expected_topic_ids
 
-            # Verify that the prerequisite chain
-            # was included in the correct order.
-            assert result["topic_ids"] == [1, 2, 3]
-
-            # Load the created learning path items
-            # directly from the database.
+            # Load the persisted learning path items.
             items = (
                 db.query(LearningPathItem)
                 .filter(
                     LearningPathItem.learning_path_id
-                    == result["learning_path_id"]
+                    == learning_path_id
                 )
                 .order_by(
                     LearningPathItem.position.asc()
@@ -318,94 +378,194 @@ def test_create_learning_path():
                 .all()
             )
 
-            # Verify that all required topics
-            # were added to the learning path.
-            assert len(items) == 3
-
-            # Verify the topic order.
+            # Verify that the database contains exactly
+            # the personalized study topics.
             assert [
                 item.topic_id
                 for item in items
-            ] == [
-                1,
-                2,
-                3,
-            ]
+            ] == expected_topic_ids
 
-            # Verify the learning path positions.
+            # Positions should remain sequential.
             assert [
                 item.position
                 for item in items
-            ] == [
-                1,
-                2,
-                3,
-            ]
-
-            # New learning path items should
-            # initially be pending.
-            assert all(
-                item.status == "pending"
-                for item in items
+            ] == list(
+                range(1, len(expected_topic_ids) + 1)
             )
 
-            # New topics should initially recommend
-            # an explanation until mastery is evaluated.
+            # Diagnostic/structural topics must not appear
+            # as study items in the learning path.
             assert all(
-                item.recommended_action == "explain"
+                item.topic_id not in {1, 2, 3}
                 for item in items
             )
 
         finally:
-            # Reset the session in case a database
-            # operation failed during the test.
             db.rollback()
 
-            # Find all learning paths created
-            # for the temporary learner.
-            learning_paths = (
-                db.query(LearningPath)
-                .filter(
-                    LearningPath.user_id == test_user_id
-                )
-                .all()
-            )
-
-            # Delete the learning path items first
-            # to respect foreign key relationships.
-            for learning_path in learning_paths:
+            # Remove the temporary learning path items.
+            if learning_path_id is not None:
                 (
                     db.query(LearningPathItem)
                     .filter(
                         LearningPathItem.learning_path_id
-                        == learning_path.learning_path_id
+                        == learning_path_id
                     )
                     .delete(
                         synchronize_session=False
                     )
                 )
 
-                # Delete the temporary learning path.
-                db.delete(learning_path)
+                (
+                    db.query(LearningPath)
+                    .filter(
+                        LearningPath.learning_path_id
+                        == learning_path_id
+                    )
+                    .delete(
+                        synchronize_session=False
+                    )
+                )
 
-            # Find the temporary learner again
-            # before deleting it.
-            temporary_user = (
+            # Remove diagnostic mastery created for the test.
+            (
+                db.query(TopicMastery)
+                .filter(
+                    TopicMastery.user_id
+                    == test_user_id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            # Remove the temporary learner.
+            (
                 db.query(User)
                 .filter(
                     User.user_id == test_user_id
                 )
-                .first()
+                .delete(
+                    synchronize_session=False
+                )
             )
 
-            # Delete the temporary learner
-            # if it still exists.
-            if temporary_user:
-                db.delete(temporary_user)
-
-            # Save the cleanup changes.
             db.commit()
 
+
+@pytest.mark.parametrize(
+    "python_score, ml_score, expected_prefix",
+    [
+        # Both prerequisites are mastered.
+        (90, 90, []),
+
+        # Python needs remediation only.
+        (50, 90, [27]),
+
+        # Machine Learning needs remediation only.
+        (90, 60, [26]),
+
+        # Both Python and Machine Learning need remediation.
+        (50, 60, [27, 26]),
+    ],
+)
+def test_personalized_topic_ids_by_diagnostic_mastery(
+    python_score,
+    ml_score,
+    expected_prefix
+):
+    """
+    Test that prerequisite remediation topics are added
+    according to the learner's diagnostic mastery.
+    """
+
+    with SessionLocal() as db:
+        unique_email = (
+            f"personalization.{uuid.uuid4().hex}"
+            "@mindcompass.local"
+        )
+
+        test_user = User(
+            name="Personalization Test User",
+            email=unique_email,
+            password_hash="test_hash",
+            role="learner"
+        )
+
+        db.add(test_user)
+        db.commit()
+        db.refresh(test_user)
+
+        test_user_id = test_user.user_id
+
+        try:
+            # Store the learner's diagnostic mastery.
+            db.add_all(
+                [
+                    TopicMastery(
+                        user_id=test_user_id,
+                        topic_id=1,
+                        mastery_score=python_score,
+                        weak_areas=[]
+                    ),
+                    TopicMastery(
+                        user_id=test_user_id,
+                        topic_id=2,
+                        mastery_score=ml_score,
+                        weak_areas=[]
+                    ),
+                ]
+            )
+            db.commit()
+
+            result = get_personalized_topic_ids(
+                db=db,
+                user_id=test_user_id,
+                target_topic_id=25
+            )
+
+            # Remediation topics should appear first,
+            # followed by the real Agentic AI curriculum.
+            expected = [
+                *expected_prefix,
+                *range(4, 26),
+            ]
+
+            assert result == expected
+
+            # Structural diagnostic topics must never
+            # become study items.
+            assert all(
+                topic_id not in {1, 2, 3}
+                for topic_id in result
+            )
+
+        finally:
+            db.rollback()
+
+            (
+                db.query(TopicMastery)
+                .filter(
+                    TopicMastery.user_id == test_user_id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            (
+                db.query(User)
+                .filter(
+                    User.user_id == test_user_id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            db.commit()
+
+            
 
 def test_get_initial_topic_status_for_low_mastery():
     """
@@ -533,185 +693,21 @@ def test_get_initial_topic_status_for_high_mastery():
             db.commit()
 
 
-def test_create_personalized_learning_path():
-    """
-    Test creating a personalized learning path
-    based on the learner's existing topic mastery.
-    """
-
-    # Open a database session for the test.
-    with SessionLocal() as db:
-
-        # Generate a unique email for every test run
-        # to avoid conflicts with existing test data.
-        unique_email = (
-            f"personalized.path.{uuid.uuid4().hex}"
-            "@mindcompass.local"
-        )
-
-        # Create a temporary learner
-        # for this test only.
-        test_user = User(
-            name="Personalized Path Test User",
-            email=unique_email,
-            password_hash="test_hash",
-            role="learner"
-        )
-
-        db.add(test_user)
-        db.commit()
-        db.refresh(test_user)
-
-        # Store the user ID separately
-        # for safe cleanup.
-        test_user_id = test_user.user_id
-
-        try:
-            # Create high mastery records for
-            # Python Basics and Machine Learning Basics.
-            python_mastery = TopicMastery(
-                user_id=test_user_id,
-                topic_id=1,
-                mastery_score=90,
-                weak_areas=[]
-            )
-
-            ml_mastery = TopicMastery(
-                user_id=test_user_id,
-                topic_id=2,
-                mastery_score=90,
-                weak_areas=[]
-            )
-
-            db.add_all([
-                python_mastery,
-                ml_mastery
-            ])
-            db.commit()
-
-            # Create an Agentic AI learning path.
-            result = create_learning_path(
-                db=db,
-                user_id=test_user_id,
-                target_topic_id=3,
-                path_name="Personalized Agentic AI Path",
-                goal="Learn Agentic AI"
-            )
-
-            # Verify that the full prerequisite chain
-            # is still included in the learning path.
-            assert result["topic_ids"] == [1, 2, 3]
-
-            # Load the personalized learning path items
-            # in their learning order.
-            items = (
-                db.query(LearningPathItem)
-                .filter(
-                    LearningPathItem.learning_path_id
-                    == result["learning_path_id"]
-                )
-                .order_by(
-                    LearningPathItem.position.asc()
-                )
-                .all()
-            )
-
-            # Verify that all required topics
-            # were added to the learning path.
-            assert len(items) == 3
-
-            # Verify that Python and ML are already
-            # completed because mastery is high.
-            assert items[0].topic_id == 1
-            assert items[0].status == "completed"
-
-            assert items[1].topic_id == 2
-            assert items[1].status == "completed"
-
-            # Verify that Agentic AI remains pending
-            # because the learner has no mastery data yet.
-            assert items[2].topic_id == 3
-            assert items[2].status == "pending"
-
-            # Verify the initial recommended actions.
-            assert items[0].recommended_action == "recommend"
-            assert items[1].recommended_action == "recommend"
-            assert items[2].recommended_action == "explain"
-
-        finally:
-            # Reset the session if a database
-            # operation failed during the test.
-            db.rollback()
-
-            # Delete temporary learning path items
-            # before deleting their learning paths.
-            learning_paths = (
-                db.query(LearningPath)
-                .filter(
-                    LearningPath.user_id == test_user_id
-                )
-                .all()
-            )
-
-            for learning_path in learning_paths:
-                (
-                    db.query(LearningPathItem)
-                    .filter(
-                        LearningPathItem.learning_path_id
-                        == learning_path.learning_path_id
-                    )
-                    .delete(
-                        synchronize_session=False
-                    )
-                )
-
-                db.delete(learning_path)
-
-            # Delete temporary mastery records.
-            (
-                db.query(TopicMastery)
-                .filter(
-                    TopicMastery.user_id == test_user_id
-                )
-                .delete(
-                    synchronize_session=False
-                )
-            )
-
-            # Delete the temporary learner.
-            temporary_user = (
-                db.query(User)
-                .filter(
-                    User.user_id == test_user_id
-                )
-                .first()
-            )
-
-            if temporary_user:
-                db.delete(temporary_user)
-
-            # Save all cleanup operations.
-            db.commit()
-
 
 def test_update_learning_path_after_high_mastery():
     """
-    Test updating a learning path item
+    Test updating a real learning-content item
     after the learner achieves high mastery.
     """
 
-    # Open a database session for the test.
     with SessionLocal() as db:
-
-        # Generate a unique email for every test run
-        # to avoid conflicts with existing test data.
+        # Generate a unique email for every test run.
         unique_email = (
             f"update.path.{uuid.uuid4().hex}"
             "@mindcompass.local"
         )
 
-        # Create a temporary learner
-        # for this test only.
+        # Create a temporary learner.
         test_user = User(
             name="Update Path Test User",
             email=unique_email,
@@ -723,39 +719,57 @@ def test_update_learning_path_after_high_mastery():
         db.commit()
         db.refresh(test_user)
 
-        # Store the user ID separately
-        # for safe cleanup.
         test_user_id = test_user.user_id
+        learning_path_id = None
 
         try:
-            # Create a learning path for Python Basics.
-            # The learner has no mastery yet, so the
-            # topic should initially be pending.
+            # Mark the diagnostic prerequisites as mastered
+            # so no Python or ML remediation topics are added.
+            db.add_all(
+                [
+                    TopicMastery(
+                        user_id=test_user_id,
+                        topic_id=1,
+                        mastery_score=90,
+                        weak_areas=[]
+                    ),
+                    TopicMastery(
+                        user_id=test_user_id,
+                        topic_id=2,
+                        mastery_score=90,
+                        weak_areas=[]
+                    ),
+                ]
+            )
+            db.commit()
+
+            # Create the personalized Agentic AI learning path.
             path_result = create_learning_path(
                 db=db,
                 user_id=test_user_id,
-                target_topic_id=1,
-                path_name="Python Test Path",
-                goal="Learn Python"
+                target_topic_id=25,
+                path_name="Agentic AI Test Path",
+                goal="Learn Agentic AI"
             )
 
             learning_path_id = (
                 path_result["learning_path_id"]
             )
 
-            # Load the Python learning path item
-            # before adding mastery data.
+            # Load Topic 4, which is the first real
+            # Agentic AI learning-content topic.
             item_before = (
                 db.query(LearningPathItem)
                 .filter(
                     LearningPathItem.learning_path_id
                     == learning_path_id,
-                    LearningPathItem.topic_id == 1
+                    LearningPathItem.topic_id == 4
                 )
                 .first()
             )
 
-            # Verify the topic starts as pending.
+            # With no mastery for Topic 4 yet,
+            # it should start as pending with explain.
             assert item_before is not None
             assert item_before.status == "pending"
             assert (
@@ -764,10 +778,10 @@ def test_update_learning_path_after_high_mastery():
             )
 
             # Simulate a successful assessment
-            # by creating a high mastery score.
+            # for the real learning-content topic.
             mastery = TopicMastery(
                 user_id=test_user_id,
-                topic_id=1,
+                topic_id=4,
                 mastery_score=90,
                 weak_areas=[]
             )
@@ -775,39 +789,39 @@ def test_update_learning_path_after_high_mastery():
             db.add(mastery)
             db.commit()
 
-            # Update the learning path using
-            # the learner's latest mastery.
+            # Update Topic 4 using the learner's
+            # latest mastery result.
             result = update_learning_path(
                 db=db,
                 user_id=test_user_id,
                 learning_path_id=learning_path_id,
-                topic_id=1
+                topic_id=4
             )
 
-            # Verify the returned update result.
+            # High mastery should complete Topic 4
+            # and recommend moving forward.
             assert result["learning_path_id"] == (
                 learning_path_id
             )
-            assert result["topic_id"] == 1
+            assert result["topic_id"] == 4
             assert result["status"] == "completed"
             assert (
                 result["recommended_action"]
                 == "recommend"
             )
 
-            # Load the item again directly from
-            # the database to verify persistence.
+            # Verify that the update was persisted.
             item_after = (
                 db.query(LearningPathItem)
                 .filter(
                     LearningPathItem.learning_path_id
                     == learning_path_id,
-                    LearningPathItem.topic_id == 1
+                    LearningPathItem.topic_id == 4
                 )
                 .first()
             )
 
-            # Verify the database was updated.
+            assert item_after is not None
             assert item_after.status == "completed"
             assert (
                 item_after.recommended_action
@@ -815,33 +829,32 @@ def test_update_learning_path_after_high_mastery():
             )
 
         finally:
-            # Reset the session if a database
-            # operation failed during the test.
             db.rollback()
 
             # Delete temporary learning path items.
-            (
-                db.query(LearningPathItem)
-                .filter(
-                    LearningPathItem.learning_path_id
-                    == learning_path_id
+            if learning_path_id is not None:
+                (
+                    db.query(LearningPathItem)
+                    .filter(
+                        LearningPathItem.learning_path_id
+                        == learning_path_id
+                    )
+                    .delete(
+                        synchronize_session=False
+                    )
                 )
-                .delete(
-                    synchronize_session=False
-                )
-            )
 
-            # Delete the temporary learning path.
-            (
-                db.query(LearningPath)
-                .filter(
-                    LearningPath.learning_path_id
-                    == learning_path_id
+                # Delete the temporary learning path.
+                (
+                    db.query(LearningPath)
+                    .filter(
+                        LearningPath.learning_path_id
+                        == learning_path_id
+                    )
+                    .delete(
+                        synchronize_session=False
+                    )
                 )
-                .delete(
-                    synchronize_session=False
-                )
-            )
 
             # Delete temporary mastery records.
             (
@@ -866,28 +879,22 @@ def test_update_learning_path_after_high_mastery():
                 )
             )
 
-            # Save all cleanup operations.
             db.commit()
-
 
 def test_update_learning_path_with_low_mastery():
     """
-    Test that a learning path item remains pending
-    when the learner still has low mastery.
+    Test that a real learning-content item remains pending
+    when the learner has a mastery score between 40 and 69.
     """
 
-    # Open a database session for the test.
     with SessionLocal() as db:
-
-        # Generate a unique email for every test run
-        # to avoid conflicts with existing test data.
+        # Generate a unique email for every test run.
         unique_email = (
             f"update.low.mastery.{uuid.uuid4().hex}"
             "@mindcompass.local"
         )
 
-        # Create a temporary learner
-        # for this test only.
+        # Create a temporary learner.
         test_user = User(
             name="Low Mastery Test User",
             email=unique_email,
@@ -899,68 +906,85 @@ def test_update_learning_path_with_low_mastery():
         db.commit()
         db.refresh(test_user)
 
-        # Store the user ID separately
-        # for safe cleanup.
         test_user_id = test_user.user_id
-
-        # Initialize the learning path ID
-        # so cleanup can safely check it.
         learning_path_id = None
 
         try:
-            # Create a learning path for Python Basics.
+            # Mark the diagnostic prerequisites as mastered
+            # so no Python or ML remediation topics are added.
+            db.add_all(
+                [
+                    TopicMastery(
+                        user_id=test_user_id,
+                        topic_id=1,
+                        mastery_score=90,
+                        weak_areas=[]
+                    ),
+                    TopicMastery(
+                        user_id=test_user_id,
+                        topic_id=2,
+                        mastery_score=90,
+                        weak_areas=[]
+                    ),
+                ]
+            )
+            db.commit()
+
+            # Create the personalized Agentic AI learning path.
             path_result = create_learning_path(
                 db=db,
                 user_id=test_user_id,
-                target_topic_id=1,
-                path_name="Python Low Mastery Path",
-                goal="Learn Python"
+                target_topic_id=25,
+                path_name="Agentic AI Low Mastery Path",
+                goal="Learn Agentic AI"
             )
 
             learning_path_id = (
                 path_result["learning_path_id"]
             )
 
-            # Create a low mastery score
-            # for Python Basics.
+            # Simulate an assessment result for Topic 4.
+            # A score of 60 should keep the topic pending
+            # and recommend additional practice.
             mastery = TopicMastery(
                 user_id=test_user_id,
-                topic_id=1,
+                topic_id=4,
                 mastery_score=60,
-                weak_areas=["functions"]
+                weak_areas=["generative AI foundations"]
             )
 
             db.add(mastery)
             db.commit()
 
-            # Update the learning path using
-            # the learner's latest mastery.
+            # Update the real learning-content item
+            # using the learner's latest mastery.
             result = update_learning_path(
                 db=db,
                 user_id=test_user_id,
                 learning_path_id=learning_path_id,
-                topic_id=1
+                topic_id=4
             )
 
-            # The topic should remain pending
-            # because mastery is below the threshold.
+            # A mastery score below 85 should
+            # keep the topic incomplete.
+            assert result["topic_id"] == 4
             assert result["status"] == "pending"
 
-            # The learner still needs explanation
-            # before completing this topic.
+            # A score between 40 and 69 should
+            # recommend practice.
             assert (
                 result["recommended_action"]
                 == "practice"
             )
 
-            # Verify the updated values were
-            # persisted in the database.
+            # Verify that the updated values
+            # were persisted in the database.
             item = (
                 db.query(LearningPathItem)
                 .filter(
                     LearningPathItem.learning_path_id
                     == learning_path_id,
-                    LearningPathItem.topic_id == 1
+                    LearningPathItem.topic_id == 4
                 )
                 .first()
             )
@@ -973,8 +997,6 @@ def test_update_learning_path_with_low_mastery():
             )
 
         finally:
-            # Reset the session if a database
-            # operation failed during the test.
             db.rollback()
 
             # Delete the temporary learning path
@@ -1025,9 +1047,7 @@ def test_update_learning_path_with_low_mastery():
                 )
             )
 
-            # Save all cleanup operations.
             db.commit()
-
 
 def test_get_topic_recommended_action():
     """
@@ -1166,24 +1186,20 @@ def test_get_topic_recommended_action():
             db.commit()
 
 
-def test_create_learning_path_with_review_action():
+def test_learning_content_with_review_mastery():
     """
-    Test that a learning path recommends review
-    when the learner has a mastery score between 70 and 84.
+    Test that a real learning-content topic receives
+    a review recommendation when mastery is between 70 and 84.
     """
 
-    # Open a database session for the test.
     with SessionLocal() as db:
-
-        # Generate a unique email for every test run
-        # to avoid conflicts with existing test data.
+        # Generate a unique email for every test run.
         unique_email = (
             f"review.path.{uuid.uuid4().hex}"
             "@mindcompass.local"
         )
 
-        # Create a temporary learner
-        # for this test only.
+        # Create a temporary learner.
         test_user = User(
             name="Review Path Test User",
             email=unique_email,
@@ -1199,61 +1215,71 @@ def test_create_learning_path_with_review_action():
         learning_path_id = None
 
         try:
-            # Simulate a previous assessment where
-            # the learner scored 75% in Machine Learning.
-            mastery = TopicMastery(
-                user_id=test_user_id,
-                topic_id=2,
-                mastery_score=75,
-                weak_areas=["model evaluation"]
-            )
+            # Mark Python and Machine Learning diagnostic
+            # prerequisites as mastered so no remediation
+            # topics are added to the learning path.
+            db.add_all(
+                [
+                    TopicMastery(
+                        user_id=test_user_id,
+                        topic_id=1,
+                        mastery_score=90,
+                        weak_areas=[]
+                    ),
+                    TopicMastery(
+                        user_id=test_user_id,
+                        topic_id=2,
+                        mastery_score=90,
+                        weak_areas=[]
+                    ),
 
-            db.add(mastery)
+                    # Topic 4 is real Agentic AI learning content.
+                    # A score of 75 should recommend review.
+                    TopicMastery(
+                        user_id=test_user_id,
+                        topic_id=4,
+                        mastery_score=75,
+                        weak_areas=["generative AI foundations"]
+                    ),
+                ]
+            )
             db.commit()
 
-            # Create a learning path targeting
-            # Machine Learning Basics.
+            # Create the personalized Agentic AI path.
             result = create_learning_path(
                 db=db,
                 user_id=test_user_id,
-                target_topic_id=2,
-                path_name="ML Review Test Path",
-                goal="Learn Machine Learning"
+                target_topic_id=25,
+                path_name="Agentic AI Review Test Path",
+                goal="Learn Agentic AI"
             )
 
-            learning_path_id = result[
-                "learning_path_id"
-            ]
+            learning_path_id = result["learning_path_id"]
 
-            # Load the Machine Learning item
-            # created inside the personalized path.
-            ml_item = (
+            # Load Topic 4 from the created learning path.
+            topic_item = (
                 db.query(LearningPathItem)
                 .filter(
                     LearningPathItem.learning_path_id
                     == learning_path_id,
-                    LearningPathItem.topic_id == 2
+                    LearningPathItem.topic_id == 4
                 )
                 .first()
             )
 
-            # A score of 75 is below the completion
-            # threshold, so the topic remains pending.
-            assert ml_item is not None
-            assert ml_item.status == "pending"
+            # Topic 4 should remain incomplete because
+            # its mastery score is below 85.
+            assert topic_item is not None
+            assert topic_item.status == "pending"
 
-            # A score between 70 and 84 should
-            # produce a targeted review recommendation.
-            assert (
-                ml_item.recommended_action
-                == "review"
-            )
+            # A mastery score between 70 and 84
+            # should recommend review.
+            assert topic_item.recommended_action == "review"
 
         finally:
             db.rollback()
 
-            # Delete the temporary learning path items
-            # if a learning path was successfully created.
+            # Delete the temporary learning path items.
             if learning_path_id is not None:
                 (
                     db.query(LearningPathItem)
@@ -1278,12 +1304,11 @@ def test_create_learning_path_with_review_action():
                     )
                 )
 
-            # Delete the temporary mastery record.
+            # Delete temporary mastery records.
             (
                 db.query(TopicMastery)
                 .filter(
-                    TopicMastery.user_id
-                    == test_user_id
+                    TopicMastery.user_id == test_user_id
                 )
                 .delete(
                     synchronize_session=False
@@ -1302,7 +1327,6 @@ def test_create_learning_path_with_review_action():
             )
 
             db.commit()
-
 
 def test_complete_learning_path():
     """
