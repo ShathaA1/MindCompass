@@ -8,6 +8,7 @@ from pages.dashboard import render as render_dashboard
 from pages.onboarding import render as render_onboarding
 from pages.diagnostic import render as render_diagnostic
 from pages.tutor import render as render_tutor
+from pages.learning_path import render as render_learning_path
 
 st.set_page_config(
     page_title="MindCompass",
@@ -389,61 +390,6 @@ def show_register():
             rerun_app()
 
 
-def show_learning_path():
-    """Display the learner's current learning path."""
-
-    st.header("Learning Path")
-
-    try:
-        response = get_learning_path(
-            st.session_state["token"]
-        )
-
-        if response.status_code != 200:
-            st.error(
-                "Unable to load learning path."
-            )
-            return
-
-        data = response.json()
-
-        if data.get("learning_path") is None:
-            st.info(
-                "Your personalized learning path "
-                "has not been generated yet."
-            )
-            return
-
-        learning_path = data["learning_path"]
-
-        st.subheader(
-            learning_path.get(
-                "name",
-                "Personalized Learning Path",
-            )
-        )
-
-        items = data.get("items", [])
-
-        for item in items:
-            position = item.get(
-                "position",
-                "",
-            )
-
-            topic_name = item.get(
-                "topic_name",
-                "Topic",
-            )
-
-            st.write(
-                f"{position}. {topic_name}"
-            )
-
-    except Exception as error:
-        st.error(
-            f"Connection error: {error}"
-        )
 
 
 def render_main_sidebar():
@@ -627,7 +573,7 @@ def show_authenticated_app():
         render_tutor()
 
     elif selected_page == "Learning Path":
-        show_learning_path()
+        render_learning_path()
 
 
 if "token" not in st.session_state:

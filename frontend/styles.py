@@ -591,6 +591,160 @@ def apply_global_styles():
             font-size: 0.84rem;
         }
 
+
+        /* ---------- Learning Path ---------- */
+
+        .mc-path-summary {
+            background: #FFFFFF;
+            border: 1px solid #DCECFB;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(54, 90, 125, 0.06);
+            padding: 24px 28px;
+            margin-top: 28px;
+            margin-bottom: 24px;
+        }
+
+        .mc-path-summary-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        .mc-path-name {
+            color: #2F5F8F;
+            font-size: 1.35rem;
+            font-weight: 650;
+            line-height: 1.3;
+        }
+
+        .mc-path-journey {
+            background: #FFFFFF;
+            border: 1px solid #DCECFB;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(54, 90, 125, 0.06);
+            padding: 12px 26px;
+        }
+
+        .mc-path-item {
+            display: flex;
+            min-height: 118px;
+        }
+
+        .mc-path-marker-column {
+            width: 52px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .mc-path-marker {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85rem;
+            font-weight: 650;
+            z-index: 1;
+        }
+
+        .mc-path-line {
+            width: 2px;
+            flex: 1;
+            background: #E2EDF6;
+        }
+
+        .mc-path-item:last-child .mc-path-line {
+            display: none;
+        }
+
+        .mc-path-content {
+            flex: 1;
+            margin-left: 14px;
+            padding: 4px 0 28px;
+        }
+
+        .mc-path-item-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+
+        .mc-path-topic {
+            color: #365A7D;
+            font-size: 1.05rem;
+            font-weight: 650;
+        }
+
+        .mc-path-state {
+            border-radius: 999px;
+            padding: 5px 10px;
+            font-size: 0.74rem;
+            font-weight: 600;
+        }
+
+        .mc-path-action {
+            color: #7B94AB;
+            font-size: 0.86rem;
+            margin-top: 10px;
+        }
+
+        .mc-path-action strong {
+            color: #527FA7;
+            font-weight: 600;
+        }
+
+        /* Completed topic */
+
+        .mc-path-item.completed .mc-path-marker {
+            background: #EAF6F0;
+            color: #5A9577;
+        }
+
+        .mc-path-item.completed .mc-path-state {
+            background: #EAF6F0;
+            color: #5A9577;
+        }
+
+        /* Current topic */
+
+        .mc-path-item.current .mc-path-marker {
+            background: #78B9F7;
+            color: #FFFFFF;
+            box-shadow: 0 0 0 5px #EDF6FF;
+        }
+
+        .mc-path-item.current .mc-path-state {
+            background: #EDF6FF;
+            color: #4E8FC7;
+        }
+
+        .mc-path-item.current .mc-path-topic {
+            color: #2F5F8F;
+        }
+
+        /* Upcoming topic */
+
+        .mc-path-item.upcoming .mc-path-marker {
+            background: #F2F6FA;
+            color: #8AA2B8;
+            border: 1px solid #DCE8F2;
+        }
+
+        .mc-path-item.upcoming .mc-path-state {
+            background: #F3F6F9;
+            color: #8AA2B8;
+        }
+
+        .mc-path-item.upcoming .mc-path-topic {
+            color: #7890A7;
+        }
+
         /* =========================================================
            Metric Cards
            ========================================================= */
