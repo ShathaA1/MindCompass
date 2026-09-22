@@ -2813,9 +2813,12 @@ def test_generate_initial_diagnostic_agentic_ai(monkeypatch):
             )
 
     # Prevent the test from calling the real RAG pipeline.
+    # Accept retrieval_query because diagnostic retrieval
+    # now supports focused semantic search queries.
     monkeypatch.setattr(
         "app.agent.graph.retrieve_topic_context",
-        lambda topic_id, topic_name: f"Context for {topic_name}"
+        lambda topic_id, topic_name, retrieval_query=None:
+            f"Context for {topic_name}"
     )
 
     # Prevent the test from calling the real LLM.
@@ -2854,6 +2857,149 @@ def test_generate_initial_diagnostic_agentic_ai(monkeypatch):
     assert result["response"] == (
         "Your diagnostic assessment is ready."
     )
+
+
+def test_initial_diagnostic_uses_rag_backed_reference_topics(
+    monkeypatch
+):
+    """
+    Test that the initial diagnostic uses the correct
+    RAG-backed reference topics and focused retrieval queries.
+
+    Diagnostic Topic 1 (Python) -> RAG Topic 27
+    Diagnostic Topic 2 (ML)     -> RAG Topic 26
+    """
+
+    retrieved_topic_ids = []
+    retrieval_queries = []
+
+    # Capture the topic IDs and retrieval queries sent
+    # to the RAG retriever.
+    def mock_retrieve_topic_context(
+        topic_id,
+        topic_name,
+        retrieval_query=None
+    ):
+        retrieved_topic_ids.append(topic_id)
+        retrieval_queries.append(retrieval_query)
+
+        return (
+            f"Learning material for {topic_name}."
+        )
+
+    # Return a valid quiz so the diagnostic node
+    # can complete without calling the real LLM.
+    class MockGenerateQuiz:
+        def invoke(self, inputs):
+            return json.dumps(
+                {
+                    "questions": [
+                        {
+                            "topic_id": 1,
+                            "question_text": (
+                                "What is a Python variable?"
+                            ),
+                            "question_type": "multiple_choice",
+                            "difficulty": "beginner",
+                            "options": [
+                                "A named value",
+                                "A database",
+                                "A model",
+                                "A network",
+                            ],
+                            "correct_answer": "A named value",
+                        }
+                    ]
+                }
+            )
+
+    # Replace the real RAG retrieval function with
+    # the test mock.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        mock_retrieve_topic_context
+    )
+
+    # Replace the real quiz generator with
+    # the test mock.
+    monkeypatch.setattr(
+        "app.agent.graph.generate_quiz",
+        MockGenerateQuiz()
+    )
+
+    # Simulate an Agentic AI learner who needs
+    # the initial prerequisite diagnostic.
+    state = {
+        "selected_path": "agentic_ai",
+        "learner_context": {
+            "current_level": "beginner"
+        },
+    }
+
+    # Run the diagnostic generation node.
+    with SessionLocal() as db:
+        result = generate_initial_diagnostic_node(
+            state,
+            db
+        )
+
+    # ---------------------------------------------------------
+    # Verify RAG source mapping
+    # ---------------------------------------------------------
+
+    # Python diagnostic Topic 1 must retrieve
+    # from the actual Python reference material Topic 27.
+    #
+    # Machine Learning diagnostic Topic 2 must retrieve
+    # from the actual ML reference material Topic 26.
+    assert retrieved_topic_ids == [27, 26]
+
+    # ---------------------------------------------------------
+    # Verify focused retrieval queries
+    # ---------------------------------------------------------
+
+    assert retrieval_queries == [
+        (
+            "Python fundamentals including variables, data types, "
+            "lists, dictionaries, control flow, loops, conditions, "
+            "functions, and basic Python behavior"
+        ),
+        (
+            "Machine learning fundamentals including supervised "
+            "and unsupervised learning, classification, regression, "
+            "clustering, features, labels, model training, "
+            "and evaluation"
+        ),
+    ]
+
+    # ---------------------------------------------------------
+    # Verify diagnostic topic identities
+    # ---------------------------------------------------------
+
+    # The diagnostic topics must remain 1 and 2 because
+    # mastery results are stored against these topics.
+    assert [
+        topic["topic_id"]
+        for topic in result["diagnostic_topics"]
+    ] == [1, 2]
+
+    # ---------------------------------------------------------
+    # Verify assessment type
+    # ---------------------------------------------------------
+
+    assert (
+        result["assessment_type"]
+        == "diagnostic"
+    )
+
+    # ---------------------------------------------------------
+    # Verify questions were generated
+    # ---------------------------------------------------------
+
+    assert len(
+        result["assessment_questions"]
+    ) == 1
+
 
 
 def test_submit_initial_diagnostic_node(monkeypatch):

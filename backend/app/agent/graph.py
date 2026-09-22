@@ -706,17 +706,22 @@ def prepare_assessment_inputs(
 
 def retrieve_topic_context(
     topic_id: int,
-    topic_name: str
+    topic_name: str,
+    retrieval_query: str | None = None
 ) -> str:
     """
     Retrieve relevant learning material from the RAG
     knowledge base for assessment generation.
     """
 
+    # Use a focused retrieval query when one is provided.
+    # Otherwise, fall back to the topic name.
+    query = retrieval_query or topic_name
+
     # Retrieve learning material only from
-    # the current topic.
+    # the selected RAG-backed topic.
     retrieved_chunks = retrieve(
-        query=topic_name,
+        query=query,
         topic_ids=topic_id,
         top_k=5
     )
@@ -735,6 +740,8 @@ def retrieve_topic_context(
     ]
 
     return "\n\n".join(context_parts)
+
+
 
 def generate_initial_diagnostic_node(
     state: TutorState,
@@ -790,18 +797,65 @@ def generate_initial_diagnostic_node(
         or "beginner"
     )
 
-    # Build RAG context for all topics included
-    # in the diagnostic assessment.
+    # Map diagnostic topics to the real RAG-backed
+    # learning materials used to generate questions.
+    #
+    # Topic 1 stores Python diagnostic mastery,
+    # while Topic 27 contains the actual Python material.
+    #
+    # Topic 2 stores Machine Learning diagnostic mastery,
+    # while Topic 26 contains the actual ML material.
+    diagnostic_rag_sources = {
+        1: {
+            "topic_id": 27,
+            "topic_name": "Python Reference Material",
+            "retrieval_query": (
+                "Python fundamentals including variables, data types, "
+                "lists, dictionaries, control flow, loops, conditions, "
+                "functions, and basic Python behavior"
+            ),
+        },
+        2: {
+            "topic_id": 26,
+            "topic_name": "Machine Learning Reference Material",
+            "retrieval_query": (
+                "Machine learning fundamentals including supervised "
+                "and unsupervised learning, classification, regression, "
+                "clustering, features, labels, model training, "
+                "and evaluation"
+            ),
+        },
+    }
+
+    # Build RAG context from the real learning materials
+    # while preserving the diagnostic topic identities.
     context_parts = []
 
     for topic in diagnostic_topics:
+        diagnostic_topic_id = topic["topic_id"]
+
+        rag_source = diagnostic_rag_sources.get(
+            diagnostic_topic_id
+        )
+
+        # Skip diagnostic topics that do not have
+        # a configured RAG-backed source.
+        if not rag_source:
+            continue
+
         topic_context = retrieve_topic_context(
-            topic_id=topic["topic_id"],
-            topic_name=topic["topic"]
+            topic_id=rag_source["topic_id"],
+            topic_name=rag_source["topic_name"],
+            retrieval_query=rag_source["retrieval_query"]
         )
 
         if topic_context:
-            context_parts.append(topic_context)
+            context_parts.append(
+                (
+                    f"Diagnostic topic: {topic['topic']}\n"
+                    f"Source material:\n{topic_context}"
+                )
+            )
 
     context = "\n\n".join(context_parts)
 
