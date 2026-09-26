@@ -372,8 +372,8 @@ def get_personalized_topic_ids(
 
     # RAG-backed reference materials used to fill
     # prerequisite knowledge gaps.
-    python_material_topic_id = 27
-    ml_material_topic_id = 26
+    python_material_topic_id = 24
+    ml_material_topic_id = 23
 
     # Topics 1-3 are diagnostic/structural records
     # and should not become study items.

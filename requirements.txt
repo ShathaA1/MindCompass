@@ -26,6 +26,7 @@ pypdf
 nbformat
 PyMuPDF
 beautifulsoup4
+lxml
 
 # Frontend
 streamlit

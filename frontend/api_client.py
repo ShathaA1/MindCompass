@@ -181,7 +181,26 @@ def create_chat_session(
         },
         timeout=REQUEST_TIMEOUT,
     )
-
+def get_chat_sessions(token):
+    """
+    Get chat sessions belonging to
+    the authenticated learner.
+    """
+    return requests.get(
+        f"{BASE_URL}/chat/sessions",
+        headers=_headers(token),
+        timeout=REQUEST_TIMEOUT,
+    )
+def get_chat_messages(token, session_id):
+    """
+    Get stored messages for one chat session
+    belonging to the authenticated learner.
+    """
+    return requests.get(
+        f"{BASE_URL}/chat/{session_id}/messages",
+        headers=_headers(token),
+        timeout=REQUEST_TIMEOUT,
+    )
 
 def send_chat_message(
     token,

@@ -19,6 +19,6 @@ AVAILABLE_LEARNING_PATHS = {
     "agentic_ai": {
         "name": "Agentic AI",
         "diagnostic_topic_ids": [1, 2],
-        "target_topic_id": 25,
+        "target_topic_id": 22,
     },
 }

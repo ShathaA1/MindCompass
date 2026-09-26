@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.agent.graph import build_tutor_graph
 from app.core.security import get_current_user
 from app.database.connection import get_db
-from app.database.models import ChatSession
+from app.database.models import ChatMessage, ChatSession
 from app.schemas.chat import (
     ChatMessageRequest,
     ChatSessionCreate,
@@ -52,7 +52,172 @@ def start_chat_session(
         "session_name": session.session_name,
         "started_at": session.started_at,
     }
+@router.get("/sessions")
+def get_chat_sessions(
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Return chat sessions belonging to the authenticated learner.
+    """
 
+    user_id = int(current_user["sub"])
+
+    sessions = (
+        db.query(ChatSession)
+        .filter(ChatSession.user_id == user_id)
+        .order_by(ChatSession.started_at.desc())
+        .all()
+    )
+
+    return {
+        "sessions": [
+            {
+                "session_id": session.chat_session_id,
+                "session_name": session.session_name,
+                "started_at": session.started_at,
+                "ended_at": session.ended_at,
+            }
+            for session in sessions
+        ]
+    }
+
+
+@router.get("/{session_id}/messages")
+def get_chat_messages(
+    session_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Return stored messages from a chat session
+    belonging to the authenticated learner.
+    """
+
+    user_id = int(current_user["sub"])
+
+    session = (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.chat_session_id == session_id,
+            ChatSession.user_id == user_id,
+        )
+        .first()
+    )
+
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail="Chat session not found.",
+        )
+
+    messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session_id)
+        .order_by(
+            ChatMessage.created_at.asc(),
+            ChatMessage.chat_message_id.asc(),
+        )
+        .all()
+    )
+
+    return {
+        "session_id": session.chat_session_id,
+        "session_name": session.session_name,
+        "messages": [
+            {
+                "message_id": message.chat_message_id,
+                "role": message.role,
+                "content": message.content,
+                "agent_action": message.agent_action,
+                "created_at": message.created_at,
+            }
+            for message in messages
+        ],
+    }
+@router.get("/sessions")
+def get_chat_sessions(
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Return chat sessions belonging to the authenticated learner.
+    """
+
+    user_id = int(current_user["sub"])
+
+    sessions = (
+        db.query(ChatSession)
+        .filter(ChatSession.user_id == user_id)
+        .order_by(ChatSession.started_at.desc())
+        .all()
+    )
+
+    return {
+        "sessions": [
+            {
+                "session_id": session.chat_session_id,
+                "session_name": session.session_name,
+                "started_at": session.started_at,
+                "ended_at": session.ended_at,
+            }
+            for session in sessions
+        ]
+    }
+
+
+@router.get("/{session_id}/messages")
+def get_chat_messages(
+    session_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Return stored messages from a chat session
+    belonging to the authenticated learner.
+    """
+
+    user_id = int(current_user["sub"])
+
+    session = (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.chat_session_id == session_id,
+            ChatSession.user_id == user_id,
+        )
+        .first()
+    )
+
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail="Chat session not found.",
+        )
+
+    messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session_id)
+        .order_by(
+            ChatMessage.created_at.asc(),
+            ChatMessage.chat_message_id.asc(),
+        )
+        .all()
+    )
+
+    return {
+        "session_id": session.chat_session_id,
+        "session_name": session.session_name,
+        "messages": [
+            {
+                "message_id": message.chat_message_id,
+                "role": message.role,
+                "content": message.content,
+                "agent_action": message.agent_action,
+                "created_at": message.created_at,
+            }
+            for message in messages
+        ],
+    }
 
 @router.post("/{session_id}/messages")
 def send_chat_message(

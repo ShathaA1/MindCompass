@@ -48,7 +48,9 @@ def logout():
         "diagnostic_topics",
         "diagnostic_questions",
         "diagnostic_started",
-    ]:
+        "chat_session_id",
+        "tutor_messages",
+        ]:
         if key in st.session_state:
             del st.session_state[key]
 

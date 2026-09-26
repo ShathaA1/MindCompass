@@ -4,6 +4,8 @@ import streamlit as st
 
 from frontend.api_client import (
     create_chat_session,
+    get_chat_messages,
+    get_chat_sessions,
     send_chat_message,
 )
 
@@ -35,15 +37,12 @@ def render():
     # Chat session initialization
     # ---------------------------------------------------------
 
-    # Create one Tutor chat session and keep its ID
-    # in Streamlit session state.
     if "chat_session_id" not in st.session_state:
 
         try:
-            response = create_chat_session(
-                token=token,
-                session_name="Tutor Session",
-            )
+            # Look for existing sessions belonging
+            # to the authenticated learner.
+            sessions_response = get_chat_sessions(token)
 
         except Exception as exc:
             st.error(
@@ -51,31 +50,82 @@ def render():
             )
             return
 
-        # Stop if the backend could not create
-        # a chat session.
-        if response.status_code != 200:
-            st.error(
-                "Could not start a Tutor session."
-            )
-            st.write(response.text)
+        if sessions_response.status_code != 200:
+            st.error("Could not load Tutor sessions.")
+            st.write(sessions_response.text)
             return
 
-        # Store the chat session ID so Streamlit
-        # reruns do not create duplicate sessions.
-        session_data = response.json()
-
-        st.session_state.chat_session_id = (
-            session_data["session_id"]
+        sessions = sessions_response.json().get(
+            "sessions",
+            [],
         )
 
+        if sessions:
+            # The backend returns newest sessions first,
+            # so continue the learner's latest conversation.
+            st.session_state.chat_session_id = (
+                sessions[0]["session_id"]
+            )
+
+        else:
+            # Create a session only when this learner
+            # does not have an existing session.
+            try:
+                response = create_chat_session(
+                    token=token,
+                    session_name="Tutor Session",
+                )
+
+            except Exception as exc:
+                st.error(
+                    f"Could not connect to the Tutor API: {exc}"
+                )
+                return
+
+            if response.status_code != 200:
+                st.error(
+                    "Could not start a Tutor session."
+                )
+                st.write(response.text)
+                return
+
+            session_data = response.json()
+
+            st.session_state.chat_session_id = (
+                session_data["session_id"]
+            )
+
     # ---------------------------------------------------------
-    # Local chat history
+    # Stored chat history
     # ---------------------------------------------------------
 
-    # Keep messages in Streamlit session state
-    # so they remain visible after each rerun.
     if "tutor_messages" not in st.session_state:
-        st.session_state.tutor_messages = []
+
+        try:
+            messages_response = get_chat_messages(
+                token=token,
+                session_id=(
+                    st.session_state.chat_session_id
+                ),
+            )
+
+        except Exception as exc:
+            st.error(
+                f"Could not load chat history: {exc}"
+            )
+            return
+
+        if messages_response.status_code != 200:
+            st.error("Could not load chat history.")
+            st.write(messages_response.text)
+            return
+
+        st.session_state.tutor_messages = (
+            messages_response.json().get(
+                "messages",
+                [],
+            )
+        )
 
     # Display previous messages.
     for message in st.session_state.tutor_messages:
