@@ -7,6 +7,7 @@ from frontend.api_client import (
     create_chat_session,
     get_chat_messages,
     get_chat_sessions,
+    get_dashboard,
     send_chat_message,
     submit_chat_assessment,
 )
@@ -252,11 +253,6 @@ def render_assessment(
 def render():
     """Render the main Tutor page."""
 
-    st.title("Tutor")
-
-    st.write(
-        "Learn with your personalized AI tutor."
-    )
 
     # ---------------------------------------------------------
     # Authentication check
@@ -270,6 +266,126 @@ def render():
         )
         return
 
+
+    # ---------------------------------------------------------
+    # Current learning context
+    # ---------------------------------------------------------
+
+    try:
+        dashboard_response = get_dashboard(
+            token
+        )
+
+    except Exception as exc:
+        st.error(
+            f"Could not load learning context: {exc}"
+        )
+        return
+
+    if dashboard_response.status_code != 200:
+        st.error(
+            "Could not load learning context."
+        )
+        return
+
+    dashboard_data = dashboard_response.json()
+
+    current_topic = (
+        dashboard_data.get("current_topic")
+        or {}
+    )
+
+    current_topic_id = current_topic.get(
+        "topic_id"
+    )
+
+    current_topic_name = current_topic.get(
+        "topic_name",
+        "No active topic"
+    )
+
+    recommended_action = (
+        dashboard_data.get("recommended_action")
+        or "Not available"
+    )
+
+    mastery_score = None
+
+    for topic_mastery in dashboard_data.get(
+        "topic_masteries",
+        []
+    ):
+        if topic_mastery.get(
+            "topic_id"
+        ) == current_topic_id:
+            mastery_score = topic_mastery.get(
+                "mastery_score"
+            )
+            break
+
+    mastery_text = (
+        f"{mastery_score:.0f}%"
+        if mastery_score is not None
+        else "Not assessed"
+    )
+
+    recommended_action_text = (
+        recommended_action
+        .replace("_", " ")
+        .title()
+    )
+
+    # ---------------------------------------------------------
+    # Tutor header
+    # ---------------------------------------------------------
+
+    st.markdown(
+        """
+        <style>
+        .st-key-tutor_header {
+            position: sticky;
+            top: 3.5rem;
+            z-index: 999;
+            background-color: #F7FBFF;
+            padding-bottom: 0.8rem;
+            border-bottom: 1px solid #DCE6F1;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.container(
+        key="tutor_header"
+    ):
+        st.title("Tutor")
+
+        st.write(
+            "Learn with your personalized AI tutor."
+        )
+
+        col1, col2, col3 = st.columns(
+            [2.5, 1, 1.4]
+        )
+
+        with col1:
+            st.caption("Current Topic")
+            st.markdown(
+                f"**{current_topic_name}**"
+            )
+
+        with col2:
+            st.caption("Mastery")
+            st.markdown(
+                f"**{mastery_text}**"
+            )
+
+        with col3:
+            st.caption("Recommended Action")
+            st.markdown(
+                f"**{recommended_action_text}**"
+            )
+    
     # ---------------------------------------------------------
     # Chat session initialization
     # ---------------------------------------------------------
