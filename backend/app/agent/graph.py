@@ -1979,20 +1979,25 @@ def prepare_review_inputs(
     state: TutorState
 ) -> dict:
     """
-    Prepare the learner, topic, mastery information,
-    and user request required for generating a
-    personalized review.
+    Prepare learner, topic, mastery, preferences,
+    and user request information required for
+    a personalized review.
     """
 
-    # Load the learner's current topic and context.
+    # Load the learner's current topic.
     current_topic = state.get(
         "current_topic",
         {}
     )
+
+    # Load learner profile information.
     learner_context = state.get(
         "learner_context",
         {}
     )
+
+    # Load mastery information for the
+    # learner's current topic.
     topic_mastery = state.get(
         "topic_mastery",
         {}
@@ -2009,8 +2014,13 @@ def prepare_review_inputs(
     if not current_topic:
         return {}
 
-    topic_id = current_topic.get("topic_id")
-    topic_name = current_topic.get("name")
+    topic_id = current_topic.get(
+        "topic_id"
+    )
+
+    topic_name = current_topic.get(
+        "name"
+    )
 
     # Stop safely if the topic information
     # is incomplete.
@@ -2025,18 +2035,33 @@ def prepare_review_inputs(
         or "beginner"
     )
 
-    # Use detected weak areas to focus the review
-    # on concepts that need additional reinforcement.
+    # Load current mastery information.
+    mastery_score = topic_mastery.get(
+        "mastery_score"
+    )
+
     weak_areas = topic_mastery.get(
         "weak_areas",
         []
+    )
+
+    # Load learner preferences from the profile.
+    preferred_format = learner_context.get(
+        "preferred_format"
+    )
+
+    preferred_pace = learner_context.get(
+        "preferred_pace"
     )
 
     return {
         "topic_id": topic_id,
         "topic_name": topic_name,
         "student_level": student_level,
+        "mastery_score": mastery_score,
         "weak_areas": weak_areas,
+        "preferred_format": preferred_format,
+        "preferred_pace": preferred_pace,
         "user_message": user_message,
     }
 
@@ -2080,23 +2105,91 @@ def review_node(
             )
         }
 
-    # Build a focused review request using the learner's
-    # detected weak areas when they are available.
-    weak_areas = review_inputs["weak_areas"]
+    # Build a personalized review request using
+    # mastery, weak areas, preferences, and user intent.
+    review_parts = [
+        f'Review the topic "{review_inputs["topic_name"]}".'
+    ]
 
-    if weak_areas:
-        weak_areas_text = ", ".join(weak_areas)
+    mastery_score = review_inputs.get(
+        "mastery_score"
+    )
 
-        review_topic = (
-            f'Review "{review_inputs["topic_name"]}" '
-            f"with focus on these weak areas: "
-            f"{weak_areas_text}"
+    if mastery_score is not None:
+        review_parts.append(
+            f"The learner's current mastery score is "
+            f"{mastery_score:.0f}%."
+        )
+
+    weak_areas = review_inputs.get(
+        "weak_areas",
+        []
+    )
+
+    # Normalize weak areas because they may be stored
+    # either as strings or structured dictionaries.
+    weak_area_names = []
+
+    for weak_area in weak_areas:
+        if isinstance(weak_area, dict):
+            area_name = weak_area.get(
+                "area"
+            )
+
+            if area_name:
+                weak_area_names.append(
+                    area_name
+                )
+        else:
+            weak_area_names.append(
+                str(weak_area)
+            )
+
+    if weak_area_names:
+        review_parts.append(
+            "Focus especially on these weak areas: "
+            + ", ".join(weak_area_names)
+            + "."
         )
     else:
-        review_topic = (
-            f'Review "{review_inputs["topic_name"]}" '
-            f"and summarize its key concepts."
+        review_parts.append(
+            "Summarize the key concepts of the topic "
+            "and reinforce the most important ideas."
         )
+
+    preferred_format = review_inputs.get(
+        "preferred_format"
+    )
+
+    if preferred_format:
+        review_parts.append(
+            "Preferred learning format: "
+            f"{preferred_format}."
+        )
+
+    preferred_pace = review_inputs.get(
+        "preferred_pace"
+    )
+
+    if preferred_pace:
+        review_parts.append(
+            "Preferred learning pace: "
+            f"{preferred_pace}."
+        )
+
+    user_message = review_inputs.get(
+        "user_message"
+    )
+
+    if user_message:
+        review_parts.append(
+            "The learner specifically requested: "
+            f"{user_message}"
+        )
+
+    review_topic = " ".join(
+        review_parts
+    )
 
     # Reuse the explanation tool to generate a focused
     # review grounded in the retrieved course material.

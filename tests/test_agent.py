@@ -3175,7 +3175,8 @@ def test_practice_node_stops_without_rag_context(
 def test_prepare_review_inputs():
     """
     Review inputs should include the current topic,
-    learner level, weak areas, and user request.
+    learner level, mastery, weak areas, preferences,
+    and user request.
     """
 
     state = {
@@ -3201,18 +3202,42 @@ def test_prepare_review_inputs():
 
     result = prepare_review_inputs(state)
 
-    assert result == {
-        "topic_id": 12,
-        "topic_name": "Building Your First Agent",
-        "student_level": "intermediate",
-        "weak_areas": [
-            "Tool selection",
-            "Tool arguments",
-        ],
-        "user_message": (
-            "Review tool selection with me."
-        ),
-    }
+    assert result["topic_id"] == 12
+
+    assert (
+        result["topic_name"]
+        == "Building Your First Agent"
+    )
+
+    assert (
+        result["student_level"]
+        == "intermediate"
+    )
+
+    assert (
+        result["mastery_score"]
+        == 75
+    )
+
+    assert result["weak_areas"] == [
+        "Tool selection",
+        "Tool arguments",
+    ]
+
+    assert (
+        result["preferred_format"]
+        is None
+    )
+
+    assert (
+        result["preferred_pace"]
+        is None
+    )
+
+    assert (
+        result["user_message"]
+        == "Review tool selection with me."
+    )
 
 
 def test_prepare_review_inputs_without_topic():
@@ -3441,7 +3466,7 @@ def test_review_node_generates_general_review_without_weak_areas(
                 in inputs["topic"]
             )
             assert (
-                "summarize its key concepts"
+                "Summarize the key concepts"
                 in inputs["topic"]
             )
             assert (
@@ -4483,3 +4508,113 @@ def test_select_practice_type_without_mastery():
     )
 
     assert result == "flashcards"
+
+
+def test_review_node_uses_personalization_data(
+    monkeypatch
+):
+    """
+    The review node should include learner mastery,
+    structured weak areas, preferences, and user request
+    in the personalized review prompt.
+    """
+
+    # Mock RAG retrieval so the test does not
+    # call the real vector database.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name, retrieval_query=None: (
+            "Python variables can be reassigned "
+            "during program execution."
+        )
+    )
+
+    captured_inputs = {}
+
+    class FakeExplainTool:
+        def invoke(self, inputs):
+            # Capture the inputs sent to the explanation tool.
+            captured_inputs.update(inputs)
+
+            return (
+                "Personalized review generated."
+            )
+
+    monkeypatch.setattr(
+        "app.agent.graph.explain",
+        FakeExplainTool()
+    )
+
+    state = {
+        "current_topic": {
+            "topic_id": 27,
+            "name": "Python Reference Material",
+        },
+        "learner_context": {
+            "current_level": "beginner",
+            "preferred_format": "practical_examples",
+            "preferred_pace": "slow",
+        },
+        "topic_mastery": {
+            "mastery_score": 75,
+            "weak_areas": [
+                {
+                    "area": "Variable reassignment",
+                    "reason": "Incorrect understanding.",
+                },
+                {
+                    "area": "Multiple assignment order",
+                    "reason": "Values were reversed.",
+                },
+            ],
+        },
+        "user_message": (
+            "Review Python variables with me."
+        ),
+    }
+
+    result = review_node(state)
+
+    review_topic = captured_inputs[
+        "topic"
+    ]
+
+    assert (
+        "75%"
+        in review_topic
+    )
+
+    assert (
+        "Variable reassignment"
+        in review_topic
+    )
+
+    assert (
+        "Multiple assignment order"
+        in review_topic
+    )
+
+    assert (
+        "practical_examples"
+        in review_topic
+    )
+
+    assert (
+        "slow"
+        in review_topic
+    )
+
+    assert (
+        "Review Python variables with me."
+        in review_topic
+    )
+
+    assert (
+        captured_inputs["student_level"]
+        == "beginner"
+    )
+
+    assert (
+        result["response"]
+        == "Personalized review generated."
+    )
