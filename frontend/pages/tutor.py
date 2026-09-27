@@ -1,6 +1,7 @@
 """Provides the Tutor Agent chat, explanations, quizzes, and practice UI."""
 
 import streamlit as st
+import json
 
 from frontend.api_client import (
     create_chat_session,
@@ -133,6 +134,17 @@ def render_assessment(
 
     result = response.json()
 
+    # Load structured personalized feedback returned
+    # by the Tutor Agent after assessment submission.
+    assessment_feedback = result.get(
+        "assessment_feedback",
+        {}
+    )
+
+    recommendation_reason = result.get(
+        "recommendation_reason"
+    )
+
     # The assessment is complete, so remove it
     # from the active Streamlit state.
     st.session_state.pop(
@@ -152,24 +164,87 @@ def render_assessment(
         "response",
         "Assessment completed.",
     )
+            
+    # Build a learner-friendly feedback message that
+    # remains visible in the Tutor conversation.
+    feedback_parts = [
+        tutor_response
+    ]
 
-    # Keep the result visible in the current
-    # Tutor conversation.
+    if assessment_feedback:
+        summary = assessment_feedback.get(
+            "summary"
+        )
+
+        strengths = assessment_feedback.get(
+            "strengths",
+            []
+        )
+
+        weak_areas = assessment_feedback.get(
+            "weak_areas",
+            []
+        )
+
+        feedback_recommendation = assessment_feedback.get(
+            "recommendation"
+        )
+
+        if summary:
+            feedback_parts.append(
+                f"\n\n**Feedback:** {summary}"
+            )
+
+        if strengths:
+            feedback_parts.append(
+                "\n\n**Strengths:**\n"
+                + "\n".join(
+                    f"- {strength}"
+                    for strength in strengths
+                )
+            )
+
+        if weak_areas:
+            feedback_parts.append(
+                "\n\n**Areas to Improve:**\n"
+                + "\n".join(
+                    f"- {area}"
+                    for area in weak_areas
+                )
+            )
+
+        if feedback_recommendation:
+            feedback_parts.append(
+                "\n\n**Recommendation:** "
+                f"{feedback_recommendation}"
+            )
+
+    if recommendation_reason:
+        feedback_parts.append(
+            "\n\n**Why this next step?** "
+            f"{recommendation_reason}"
+        )
+
+    complete_feedback = "".join(
+        feedback_parts
+    )
+
+    # Save the complete feedback in conversation state
+    # so it remains visible after Streamlit reruns.
     st.session_state.tutor_messages.append(
         {
             "role": "assistant",
-            "content": tutor_response,
+            "content": complete_feedback,
         }
     )
 
-    st.success(tutor_response)
-
-    recommendation_reason = result.get(
-        "recommendation_reason"
+    st.success(
+        "Assessment completed."
     )
 
-    if recommendation_reason:
-        st.info(recommendation_reason)
+    st.markdown(
+        complete_feedback
+    )
 
     st.rerun()
 
@@ -386,6 +461,18 @@ def render():
         [],
     )
 
+    # Parse structured practice data so Streamlit
+    # can render it using native UI components.
+    practice_data = None
+
+    if agent_action == "practice":
+        try:
+            practice_data = json.loads(
+                tutor_response
+            )
+        except json.JSONDecodeError:
+            practice_data = None
+
     # ---------------------------------------------------------
     # Assessment response
     # ---------------------------------------------------------
@@ -407,6 +494,95 @@ def render():
         # Rerun so the generated assessment is
         # rendered using the MCQ interface above.
         st.rerun()
+
+
+    # ---------------------------------------------------------
+    # Practice response
+    # ---------------------------------------------------------
+
+    if (
+        agent_action == "practice"
+        and practice_data
+    ):
+        practice_type = practice_data.get(
+            "practice_type",
+            "practice"
+        )
+
+        practice_items = practice_data.get(
+            "items",
+            []
+        )
+
+        with st.chat_message("assistant"):
+            st.markdown(
+                "### "
+                + practice_type.replace(
+                    "_",
+                    " "
+                ).title()
+            )
+
+            for index, item in enumerate(
+                practice_items,
+                start=1
+            ):
+                prompt = item.get(
+                    "prompt",
+                    ""
+                )
+
+                answer = item.get(
+                    "answer",
+                    ""
+                )
+
+                st.markdown(
+                    f"**{index}. {prompt}**"
+                )
+
+                with st.expander(
+                    "Show answer"
+                ):
+                    st.markdown(
+                        str(answer)
+                    )
+
+            # Temporary E2E routing information.
+            st.caption(
+                "Agent action: practice"
+            )
+
+        # Store a readable version in chat history.
+        practice_history_parts = [
+            "### "
+            + practice_type.replace(
+                "_",
+                " "
+            ).title()
+        ]
+
+        for index, item in enumerate(
+            practice_items,
+            start=1
+        ):
+            practice_history_parts.append(
+                f"\n\n**{index}. "
+                f"{item.get('prompt', '')}**"
+                f"\n\nAnswer: "
+                f"{item.get('answer', '')}"
+            )
+
+        st.session_state.tutor_messages.append(
+            {
+                "role": "assistant",
+                "content": "".join(
+                    practice_history_parts
+                ),
+            }
+        )
+
+        return
 
     # ---------------------------------------------------------
     # Normal Tutor response
