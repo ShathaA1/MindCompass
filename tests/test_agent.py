@@ -15,17 +15,15 @@ from app.agent.graph import (
     evaluate_assessment_responses,
     submit_assessment_node,
     route_assessment,
-    prepare_teaching_inputs,
     teach_node,
-    prepare_practice_inputs,
     practice_node,
-    prepare_review_inputs,
     review_node,
     generate_initial_diagnostic_node,
     submit_initial_diagnostic_node,
     route_initial_setup,
     route_tutor_entry,
     select_practice_type,
+    prepare_personalized_inputs,
 )
 from app.agent.planning import (
     determine_learner_need,
@@ -2563,7 +2561,7 @@ def test_route_assessment_to_submit():
 
 
 
-def test_prepare_teaching_inputs():
+def test_prepare_personalized_inputs():
     """
     Teaching inputs should be prepared from
     the current topic, learner context, and user request.
@@ -2583,7 +2581,7 @@ def test_prepare_teaching_inputs():
         ),
     }
 
-    result = prepare_teaching_inputs(state)
+    result = prepare_personalized_inputs(state)
 
     assert result["topic_id"] == 12
 
@@ -2615,7 +2613,7 @@ def test_prepare_teaching_inputs():
     assert result["conversation_history"] == []
 
 
-def test_prepare_teaching_inputs_without_topic():
+def test_prepare_personalized_inputs_without_topic():
     """
     Teaching input preparation should stop safely
     when no current topic is available.
@@ -2628,7 +2626,7 @@ def test_prepare_teaching_inputs_without_topic():
         },
     }
 
-    result = prepare_teaching_inputs(state)
+    result = prepare_personalized_inputs(state)
 
     assert result == {}
 
@@ -2897,96 +2895,6 @@ def test_teach_node_uses_personalization_data(
     )
 
 
-def test_prepare_practice_inputs():
-    """
-    Practice inputs should include the current topic,
-    learner level, mastery, weak areas, preferences,
-    and user request.
-    """
-
-    state = {
-        "current_topic": {
-            "topic_id": 12,
-            "name": "Building Your First Agent",
-        },
-        "learner_context": {
-            "initial_level": "beginner",
-            "current_level": "intermediate",
-        },
-        "topic_mastery": {
-            "mastery_score": 55,
-            "weak_areas": [
-                "Tool selection",
-                "Tool arguments",
-            ],
-        },
-        "user_message": (
-            "Give me practice questions about tool selection."
-        ),
-    }
-
-    result = prepare_practice_inputs(state)
-
-    assert result["topic_id"] == 12
-
-    assert (
-        result["topic_name"]
-        == "Building Your First Agent"
-    )
-
-    assert (
-        result["student_level"]
-        == "intermediate"
-    )
-
-    assert (
-        result["mastery_score"]
-        == 55
-    )
-
-    assert result["weak_areas"] == [
-        "Tool selection",
-        "Tool arguments",
-    ]
-
-    assert (
-        result["preferred_format"]
-        is None
-    )
-
-    assert (
-        result["preferred_pace"]
-        is None
-    )
-
-    assert (
-        result["user_message"]
-        == "Give me practice questions about tool selection."
-    )
-
-def test_prepare_practice_inputs_without_topic():
-    """
-    Practice input preparation should stop safely
-    when no current topic is available.
-    """
-
-    state = {
-        "current_topic": {},
-        "learner_context": {
-            "current_level": "intermediate",
-        },
-        "topic_mastery": {
-            "mastery_score": 55,
-            "weak_areas": [
-                "Tool selection",
-            ],
-        },
-    }
-
-    result = prepare_practice_inputs(state)
-
-    assert result == {}
-
 
 def test_practice_node_generates_personalized_practice(
     monkeypatch
@@ -3171,100 +3079,6 @@ def test_practice_node_stops_without_rag_context(
 
     assert "no learning context" in result["response"]
 
-
-def test_prepare_review_inputs():
-    """
-    Review inputs should include the current topic,
-    learner level, mastery, weak areas, preferences,
-    and user request.
-    """
-
-    state = {
-        "current_topic": {
-            "topic_id": 12,
-            "name": "Building Your First Agent",
-        },
-        "learner_context": {
-            "initial_level": "beginner",
-            "current_level": "intermediate",
-        },
-        "topic_mastery": {
-            "mastery_score": 75,
-            "weak_areas": [
-                "Tool selection",
-                "Tool arguments",
-            ],
-        },
-        "user_message": (
-            "Review tool selection with me."
-        ),
-    }
-
-    result = prepare_review_inputs(state)
-
-    assert result["topic_id"] == 12
-
-    assert (
-        result["topic_name"]
-        == "Building Your First Agent"
-    )
-
-    assert (
-        result["student_level"]
-        == "intermediate"
-    )
-
-    assert (
-        result["mastery_score"]
-        == 75
-    )
-
-    assert result["weak_areas"] == [
-        "Tool selection",
-        "Tool arguments",
-    ]
-
-    assert (
-        result["preferred_format"]
-        is None
-    )
-
-    assert (
-        result["preferred_pace"]
-        is None
-    )
-
-    assert (
-        result["user_message"]
-        == "Review tool selection with me."
-    )
-
-
-def test_prepare_review_inputs_without_topic():
-    """
-    Review input preparation should stop safely
-    when no current topic is available.
-    """
-
-    state = {
-        "current_topic": {},
-        "learner_context": {
-            "current_level": "intermediate",
-        },
-        "topic_mastery": {
-            "mastery_score": 75,
-            "weak_areas": [
-                "Tool selection",
-            ],
-        },
-        "user_message": (
-            "Review tool selection with me."
-        ),
-    }
-
-    result = prepare_review_inputs(state)
-
-    assert result == {}
 
 
 def test_review_node_generates_focused_review(
@@ -4211,7 +4025,7 @@ def test_route_tutor_entry_continues_normal_tutor():
     assert result == "continue_tutor"
 
 
-def test_prepare_teaching_inputs_with_personalization():
+def test_prepare_personalized_inputs_with_personalization():
     """
     Teaching inputs should include learner mastery,
     preferences, conversation history, and current request.
@@ -4249,7 +4063,7 @@ def test_prepare_teaching_inputs_with_personalization():
         "user_message": "Explain Python variables.",
     }
 
-    result = prepare_teaching_inputs(state)
+    result = prepare_personalized_inputs(state)
 
     assert result["topic_id"] == 27
 

@@ -20,7 +20,6 @@ from app.agent.planning import (
     plan_next_topic,
     recommend_next_action,
     resolve_action,
-    route_action,
     route_recommended_action,
 )
 
@@ -39,6 +38,9 @@ from app.tools.feedback_generation import generate_feedback
 
 from app.rag.retrieval import retrieve
 
+#----------------------------------------------------------
+# Database / state loading helpers
+#----------------------------------------------------------
 
 def load_learner_context(
     state: TutorState,
@@ -160,10 +162,9 @@ def load_conversation_history(
         "conversation_history": conversation_history
     }
 
-# ------------------------------------------------------------------
-# LangGraph-compatible node wrappers
-# ------------------------------------------------------------------
-
+#----------------------------------------------------------
+# LangGraph DB wrappers
+#----------------------------------------------------------
 
 def load_learner_context_node(
     state: TutorState
@@ -247,8 +248,13 @@ def load_conversation_history_node(
         )
 
 
+#----------------------------------------------------------
+# Routing
+#----------------------------------------------------------
 
-def route_initial_setup(state: TutorState) -> str:
+def route_initial_setup(
+    state: TutorState
+) -> str:
     """
     Decide whether the learner should enter
     the initial diagnostic flow or continue
@@ -257,7 +263,9 @@ def route_initial_setup(state: TutorState) -> str:
 
     # A selected path indicates that the learner
     # is currently setting up a new learning path.
-    selected_path = state.get("selected_path")
+    selected_path = state.get(
+        "selected_path"
+    )
 
     if not selected_path:
         return "continue_tutor"
@@ -274,12 +282,16 @@ def route_initial_setup(state: TutorState) -> str:
         []
     )
 
-    if assessment_questions and assessment_answers:
+    if (
+        assessment_questions
+        and assessment_answers
+    ):
         return "submit_initial_diagnostic"
 
     # Otherwise, generate the initial diagnostic
     # for the selected learning path.
     return "generate_initial_diagnostic"
+
 
 def route_tutor_entry(
     state: TutorState
@@ -322,280 +334,42 @@ def route_tutor_entry(
         return "submit_assessment"
 
     # Normal Tutor conversation.
-    return "continue_tutor"
+    return "continue_tutor"  
 
 
-
-def build_tutor_graph():
+def route_assessment(
+    state: TutorState
+) -> str:
     """
-    Build and compile the Tutor Agent workflow.
+    Decide whether the learner needs a new assessment
+    or is submitting answers to an existing assessment.
     """
 
-    # Create a new LangGraph workflow
-    # using TutorState as the shared agent state.
-    workflow = StateGraph(TutorState)
-
-    # Add the nodes responsible for loading
-    # learner and learning path information.
-    workflow.add_node(
-        "load_learner_context",
-        load_learner_context_node
+    # Load any assessment questions that were
+    # previously generated for the learner.
+    questions = state.get(
+        "assessment_questions",
+        []
     )
 
-    # Add the node that generates the initial
-    # diagnostic for a newly selected learning path.
-    workflow.add_node(
-        "generate_initial_diagnostic",
-        generate_initial_diagnostic_graph_node
+    # Load any answers submitted by the learner.
+    answers = state.get(
+        "assessment_answers",
+        []
     )
 
-    workflow.add_node(
-        "submit_initial_diagnostic",
-        submit_initial_diagnostic_graph_node
-    )
+    # If questions and answers are both available,
+    # the learner is submitting an assessment.
+    if questions and answers:
+        return "submit_assessment"
 
-    workflow.add_node(
-        "load_conversation_history",
-        load_conversation_history_node
-    )
-
-    workflow.add_node(
-        "load_active_learning_path",
-        load_active_learning_path_node
-    )
-
-    # Add the node that determines
-    # what the learner currently needs.
-    workflow.add_node(
-        "determine_learner_need",
-        determine_learner_need
-    )
-
-    # Add the node that selects the next topic
-    # based on path order and prerequisites.
-    workflow.add_node(
-        "plan_next_topic",
-        plan_next_topic_node
-    )
-
-    # Add the node that loads mastery information
-    # for the selected topic.
-    workflow.add_node(
-        "load_topic_mastery",
-        load_topic_mastery_node
-    )
-
-    # Add the node that recommends the next action
-    # based on the learner's mastery score.
-    workflow.add_node(
-        "recommend_next_action",
-        recommend_next_action
-    )
-
-    # Add the node that resolves the final action
-    # using both learner intent and recommendation.
-    workflow.add_node(
-        "resolve_action",
-        resolve_action
-    )
-
-    # Add the main Tutor action nodes for
-    # teaching, assessment, practice, and review.
-    workflow.add_node(
-        "teach",
-        teach_node
-    )
-
-    # Add the node that generates a new assessment
-    # for the learner's current topic.
-    workflow.add_node(
-        "generate_assessment",
-        generate_assessment_node
-    )
-
-    # Add the node that processes submitted
-    # assessment answers and updates mastery.
-    workflow.add_node(
-        "submit_assessment",
-        submit_assessment_node
-    )
-
-    # Add a routing node that decides whether
-    # to generate or submit an assessment.
-    workflow.add_node(
-        "assessment_router",
-        lambda state: {}
-    )
-
-    workflow.add_node(
-        "practice",
-        practice_node
-    )
-
-    workflow.add_node(
-        "review",
-        review_node
-    )
-
-    # Add the recommendation action node
-    # to the Tutor Agent workflow.
-    workflow.add_node(
-        "recommend",
-        recommend_node
-    )
-
-    # Add the learning path update node.
-    # This node is used when the learner
-    # has completed the current topic.
-    workflow.add_node(
-        "update_learning_path",
-        update_learning_path_node
-    )
-
-    # Define the main workflow sequence.
-    workflow.add_edge(
-        START,
-        "load_learner_context"
-    )
-
-    # After loading the learner profile, decide
-    # whether to run initial path setup or
-    # continue with the normal Tutor Agent flow.
-    workflow.add_conditional_edges(
-        "load_learner_context",
-        route_tutor_entry,
-        {
-            "generate_initial_diagnostic": (
-                "generate_initial_diagnostic"
-            ),
-            "submit_initial_diagnostic": (
-                "submit_initial_diagnostic"
-            ),
-            "submit_assessment": (
-                "submit_assessment"
-            ),
-            "continue_tutor": (
-                "load_conversation_history"
-            ),
-        }
-    )
-
-    workflow.add_edge(
-        "load_conversation_history",
-        "load_active_learning_path"
-    )
-
-    workflow.add_edge(
-        "load_active_learning_path",
-        "determine_learner_need"
-    )
-
-    workflow.add_edge(
-        "determine_learner_need",
-        "plan_next_topic"
-    )
-
-    workflow.add_edge(
-        "plan_next_topic",
-        "load_topic_mastery"
-    )
-
-    workflow.add_edge(
-        "load_topic_mastery",
-        "recommend_next_action"
-    )
-
-    workflow.add_edge(
-        "recommend_next_action",
-        "resolve_action"
-    )
-
-    # Route the workflow to the correct action node
-    # based on the final recommended action.
-    workflow.add_conditional_edges(
-        "resolve_action",
-        route_recommended_action,
-        {
-            # Route each final agent decision
-            # to its corresponding action node.
-            "teach": "teach",
-            "assess": "assessment_router",
-            "practice": "practice",
-            "review": "review",
-            "recommend": "update_learning_path",
-        }
-    )
+    # Otherwise, generate a new assessment.
+    return "generate_assessment"
 
 
-    # Decide whether the learner needs a new
-    # assessment or is submitting existing answers.
-    workflow.add_conditional_edges(
-        "assessment_router",
-        route_assessment,
-        {
-            "generate_assessment": "generate_assessment",
-            "submit_assessment": "submit_assessment",
-        }
-    )
-
-    # After marking the current topic as completed,
-    # continue to the recommendation workflow.
-    workflow.add_edge(
-        "update_learning_path",
-        "recommend"
-    )
-    # End the workflow after the selected action node runs.
-    workflow.add_edge(
-        "teach",
-        END
-    )
-
-    # End after generating a new assessment.
-    # The workflow waits for the learner to answer.
-    workflow.add_edge(
-        "generate_assessment",
-        END
-    )
-
-    # End after processing submitted answers
-    # and updating the learner's mastery.
-    workflow.add_edge(
-        "submit_assessment",
-        END
-    )
-
-    workflow.add_edge(
-        "practice",
-        END
-    )
-
-    workflow.add_edge(
-        "review",
-        END
-    )
-
-    workflow.add_edge(
-        "recommend",
-        END
-    )
-
-        # End after generating the initial diagnostic.
-    # The workflow waits for the learner to submit answers.
-    workflow.add_edge(
-        "generate_initial_diagnostic",
-        END
-    )
-
-    # End after processing the diagnostic
-    # and creating the personalized learning path.
-    workflow.add_edge(
-        "submit_initial_diagnostic",
-        END
-    )
-
-    # Compile the workflow into an executable graph.
-    return workflow.compile()
-
+#----------------------------------------------------------
+# Shared personalization helpers
+#----------------------------------------------------------
 
 def prepare_personalized_inputs(
     state: TutorState
@@ -668,18 +442,6 @@ def prepare_personalized_inputs(
         ),
     }
 
-
-
-def prepare_teaching_inputs(
-    state: TutorState
-) -> dict:
-    """
-    Prepare personalized inputs for teaching.
-    """
-
-    return prepare_personalized_inputs(
-        state
-    )
 
 def normalize_weak_areas(
     weak_areas: list | None
@@ -804,191 +566,6 @@ def build_personalization_parts(
 
     return parts
 
-def teach_node(
-    state: TutorState
-) -> dict:
-    """
-    Generate a personalized teaching response using
-    the learner's current topic and retrieved context.
-    """
-
-    # Prepare the learner and topic information
-    # required for the teaching workflow.
-    teaching_inputs = prepare_teaching_inputs(state)
-
-    if not teaching_inputs:
-        return {
-            "response": (
-                "An explanation could not be generated "
-                "because no current topic is available."
-            )
-        }
-
-    # Retrieve learning material from the current topic
-    # using the learner's specific request as the
-    # semantic search query.
-    context = retrieve_topic_context(
-        topic_id=teaching_inputs["topic_id"],
-        topic_name=teaching_inputs["topic_name"],
-        retrieval_query=teaching_inputs["user_message"]
-    )
-
-    if not context:
-        return {
-            "response": (
-                "An explanation could not be generated "
-                "because no learning context was found "
-                "for the current topic."
-            )
-        }
-
-
-    personalization_parts = [
-        f'Teach the topic "{teaching_inputs["topic_name"]}".'
-    ]
-    
-    personalization_parts.extend(
-        build_personalization_parts(
-            inputs=teaching_inputs,
-            request_label="The learner specifically asked",
-        )
-    )
-    
-    weak_area_names = normalize_weak_areas(
-        teaching_inputs.get(
-            "weak_areas"
-        )
-    )
-
-    if weak_area_names:
-        personalization_parts.append(
-            "Focus especially on these weak areas: "
-            + ", ".join(weak_area_names)
-            + "."
-    )
-
-    
-
-    personalized_topic = " ".join(
-        personalization_parts
-    )
-
-    # Generate a personalized explanation using
-    # learner mastery, weak areas, preferences,
-    # and retrieved course material.
-    explanation = explain.invoke({
-        "topic": personalized_topic,
-        "context": context,
-        "student_level": teaching_inputs[
-            "student_level"
-        ],
-    })
-
-    return {
-        "response": explanation
-    }
-
-
-def prepare_assessment_inputs(
-    state: TutorState
-) -> dict:
-    """
-    Prepare learner, topic, mastery, preferences,
-    and request information required for generating
-    a personalized assessment.
-    """
-
-    # Load the learner's current topic.
-    current_topic = state.get(
-        "current_topic",
-        {}
-    )
-
-    # Load learner profile information.
-    learner_context = state.get(
-        "learner_context",
-        {}
-    )
-
-    # Load mastery information for the
-    # learner's current topic.
-    topic_mastery = state.get(
-        "topic_mastery",
-        {}
-    )
-
-    # Load the learner's current request so RAG
-    # can retrieve assessment-relevant material.
-    user_message = state.get(
-        "user_message",
-        ""
-    )
-
-    # Assessment generation requires
-    # an active topic.
-    if not current_topic:
-        return {}
-
-    topic_id = current_topic.get(
-        "topic_id"
-    )
-
-    topic_name = current_topic.get(
-        "name"
-    )
-
-    # Stop safely if topic information
-    # is incomplete.
-    if not topic_id or not topic_name:
-        return {}
-
-    # Prefer the learner's latest assessed level.
-    student_level = (
-        learner_context.get("current_level")
-        or learner_context.get("initial_level")
-        or "beginner"
-    )
-
-    # Load current mastery information.
-    mastery_score = topic_mastery.get(
-        "mastery_score"
-    )
-
-    weak_areas = topic_mastery.get(
-        "weak_areas",
-        []
-    )
-
-    # Load learner preferences.
-    preferred_format = learner_context.get(
-        "preferred_format"
-    )
-
-    preferred_pace = learner_context.get(
-        "preferred_pace"
-    )
-
-    topics = [
-        {
-            "topic_id": topic_id,
-            "topic": topic_name,
-        }
-    ]
-
-    return {
-        "topics": topics,
-        "student_level": student_level,
-        "assessment_type": (
-            state.get("assessment_type")
-            or "topic"
-        ),
-        "mastery_score": mastery_score,
-        "weak_areas": weak_areas,
-        "preferred_format": preferred_format,
-        "preferred_pace": preferred_pace,
-        "user_message": user_message,
-    }
-
 
 def retrieve_topic_context(
     topic_id: int,
@@ -1028,6 +605,10 @@ def retrieve_topic_context(
     return "\n\n".join(context_parts)
 
 
+
+#----------------------------------------------------------
+# Diagnostic flow
+#----------------------------------------------------------
 
 def generate_initial_diagnostic_node(
     state: TutorState,
@@ -1358,6 +939,129 @@ def submit_initial_diagnostic_graph_node(
             state=state,
             db=db
         )
+
+#----------------------------------------------------------
+# Teaching
+#----------------------------------------------------------
+
+
+def teach_node(
+    state: TutorState
+) -> dict:
+    """
+    Generate a personalized teaching response using
+    the learner's current topic and retrieved context.
+    """
+
+    # Prepare the learner and topic information
+    # required for the teaching workflow.
+    teaching_inputs = prepare_personalized_inputs(state)
+
+    if not teaching_inputs:
+        return {
+            "response": (
+                "An explanation could not be generated "
+                "because no current topic is available."
+            )
+        }
+
+    # Retrieve learning material from the current topic
+    # using the learner's specific request as the
+    # semantic search query.
+    context = retrieve_topic_context(
+        topic_id=teaching_inputs["topic_id"],
+        topic_name=teaching_inputs["topic_name"],
+        retrieval_query=teaching_inputs["user_message"]
+    )
+
+    if not context:
+        return {
+            "response": (
+                "An explanation could not be generated "
+                "because no learning context was found "
+                "for the current topic."
+            )
+        }
+
+
+    personalization_parts = [
+        f'Teach the topic "{teaching_inputs["topic_name"]}".'
+    ]
+    
+    personalization_parts.extend(
+        build_personalization_parts(
+            inputs=teaching_inputs,
+            request_label="The learner specifically asked",
+        )
+    )
+    
+    weak_area_names = normalize_weak_areas(
+        teaching_inputs.get(
+            "weak_areas"
+        )
+    )
+
+    if weak_area_names:
+        personalization_parts.append(
+            "Focus especially on these weak areas: "
+            + ", ".join(weak_area_names)
+            + "."
+    )
+
+    
+
+    personalized_topic = " ".join(
+        personalization_parts
+    )
+
+    # Generate a personalized explanation using
+    # learner mastery, weak areas, preferences,
+    # and retrieved course material.
+    explanation = explain.invoke({
+        "topic": personalized_topic,
+        "context": context,
+        "student_level": teaching_inputs[
+            "student_level"
+        ],
+    })
+
+    return {
+        "response": explanation
+    }
+
+#----------------------------------------------------------
+# Assessment
+#----------------------------------------------------------
+
+def prepare_assessment_inputs(
+    state: TutorState
+) -> dict:
+    """
+    Prepare personalized inputs for assessment generation.
+    """
+
+    base_inputs = prepare_personalized_inputs(
+        state
+    )
+
+    if not base_inputs:
+        return {}
+
+    return {
+        **base_inputs,
+        "topics": [
+            {
+                "topic_id": base_inputs["topic_id"],
+                "topic": base_inputs["topic_name"],
+            }
+        ],
+        "assessment_type": (
+            state.get("assessment_type")
+            or "topic"
+        ),
+    }
+
+
 
 
 def generate_assessment_node(
@@ -1811,46 +1515,9 @@ def submit_assessment_node(
     }
 
 
-def route_assessment(
-    state: TutorState
-) -> str:
-    """
-    Decide whether the learner needs a new assessment
-    or is submitting answers to an existing assessment.
-    """
-
-    # Load any assessment questions that were
-    # previously generated for the learner.
-    questions = state.get(
-        "assessment_questions",
-        []
-    )
-
-    # Load any answers submitted by the learner.
-    answers = state.get(
-        "assessment_answers",
-        []
-    )
-
-    # If questions and answers are both available,
-    # the learner is submitting an assessment.
-    if questions and answers:
-        return "submit_assessment"
-
-    # Otherwise, generate a new assessment.
-    return "generate_assessment"
-
-
-def prepare_practice_inputs(
-    state: TutorState
-) -> dict:
-    """
-    Prepare personalized inputs for practice.
-    """
-
-    return prepare_personalized_inputs(
-        state
-    )
+#----------------------------------------------------------
+# Practice
+#----------------------------------------------------------
 
 def select_practice_type(
     topic_name: str,
@@ -1953,7 +1620,7 @@ def practice_node(
 
     # Prepare the learner, topic, and mastery information
     # required for the practice workflow.
-    practice_inputs = prepare_practice_inputs(state)
+    practice_inputs = prepare_personalized_inputs(state)
 
     if not practice_inputs:
         return {
@@ -2032,16 +1699,9 @@ def practice_node(
         "response": practice
     }
 
-def prepare_review_inputs(
-    state: TutorState
-) -> dict:
-    """
-    Prepare personalized inputs for review.
-    """
-
-    return prepare_personalized_inputs(
-        state
-    )
+#----------------------------------------------------------
+# Review
+#----------------------------------------------------------
 
 
 def review_node(
@@ -2055,7 +1715,7 @@ def review_node(
 
     # Prepare the learner, topic, mastery information,
     # and current request required for the review.
-    review_inputs = prepare_review_inputs(state)
+    review_inputs = prepare_personalized_inputs(state)
 
     if not review_inputs:
         return {
@@ -2133,6 +1793,10 @@ def review_node(
         "response": review
     }
 
+
+#----------------------------------------------------------
+# Recommendation / Learning Path
+#----------------------------------------------------------
 
 def recommend_node(
     state: TutorState
@@ -2320,4 +1984,277 @@ def update_learning_path_node(
     }
 
 
+#----------------------------------------------------------
+# build_tutor_graph
+#----------------------------------------------------------
 
+
+def build_tutor_graph():
+    """
+    Build and compile the Tutor Agent workflow.
+    """
+
+    # Create a new LangGraph workflow
+    # using TutorState as the shared agent state.
+    workflow = StateGraph(TutorState)
+
+    # Add the nodes responsible for loading
+    # learner and learning path information.
+    workflow.add_node(
+        "load_learner_context",
+        load_learner_context_node
+    )
+
+    # Add the node that generates the initial
+    # diagnostic for a newly selected learning path.
+    workflow.add_node(
+        "generate_initial_diagnostic",
+        generate_initial_diagnostic_graph_node
+    )
+
+    workflow.add_node(
+        "submit_initial_diagnostic",
+        submit_initial_diagnostic_graph_node
+    )
+
+    workflow.add_node(
+        "load_conversation_history",
+        load_conversation_history_node
+    )
+
+    workflow.add_node(
+        "load_active_learning_path",
+        load_active_learning_path_node
+    )
+
+    # Add the node that determines
+    # what the learner currently needs.
+    workflow.add_node(
+        "determine_learner_need",
+        determine_learner_need
+    )
+
+    # Add the node that selects the next topic
+    # based on path order and prerequisites.
+    workflow.add_node(
+        "plan_next_topic",
+        plan_next_topic_node
+    )
+
+    # Add the node that loads mastery information
+    # for the selected topic.
+    workflow.add_node(
+        "load_topic_mastery",
+        load_topic_mastery_node
+    )
+
+    # Add the node that recommends the next action
+    # based on the learner's mastery score.
+    workflow.add_node(
+        "recommend_next_action",
+        recommend_next_action
+    )
+
+    # Add the node that resolves the final action
+    # using both learner intent and recommendation.
+    workflow.add_node(
+        "resolve_action",
+        resolve_action
+    )
+
+    # Add the main Tutor action nodes for
+    # teaching, assessment, practice, and review.
+    workflow.add_node(
+        "teach",
+        teach_node
+    )
+
+    # Add the node that generates a new assessment
+    # for the learner's current topic.
+    workflow.add_node(
+        "generate_assessment",
+        generate_assessment_node
+    )
+
+    # Add the node that processes submitted
+    # assessment answers and updates mastery.
+    workflow.add_node(
+        "submit_assessment",
+        submit_assessment_node
+    )
+
+    # Add a routing node that decides whether
+    # to generate or submit an assessment.
+    workflow.add_node(
+        "assessment_router",
+        lambda state: {}
+    )
+
+    workflow.add_node(
+        "practice",
+        practice_node
+    )
+
+    workflow.add_node(
+        "review",
+        review_node
+    )
+
+    # Add the recommendation action node
+    # to the Tutor Agent workflow.
+    workflow.add_node(
+        "recommend",
+        recommend_node
+    )
+
+    # Add the learning path update node.
+    # This node is used when the learner
+    # has completed the current topic.
+    workflow.add_node(
+        "update_learning_path",
+        update_learning_path_node
+    )
+
+    # Define the main workflow sequence.
+    workflow.add_edge(
+        START,
+        "load_learner_context"
+    )
+
+    # After loading the learner profile, decide
+    # whether to run initial path setup or
+    # continue with the normal Tutor Agent flow.
+    workflow.add_conditional_edges(
+        "load_learner_context",
+        route_tutor_entry,
+        {
+            "generate_initial_diagnostic": (
+                "generate_initial_diagnostic"
+            ),
+            "submit_initial_diagnostic": (
+                "submit_initial_diagnostic"
+            ),
+            "submit_assessment": (
+                "submit_assessment"
+            ),
+            "continue_tutor": (
+                "load_conversation_history"
+            ),
+        }
+    )
+
+    workflow.add_edge(
+        "load_conversation_history",
+        "load_active_learning_path"
+    )
+
+    workflow.add_edge(
+        "load_active_learning_path",
+        "determine_learner_need"
+    )
+
+    workflow.add_edge(
+        "determine_learner_need",
+        "plan_next_topic"
+    )
+
+    workflow.add_edge(
+        "plan_next_topic",
+        "load_topic_mastery"
+    )
+
+    workflow.add_edge(
+        "load_topic_mastery",
+        "recommend_next_action"
+    )
+
+    workflow.add_edge(
+        "recommend_next_action",
+        "resolve_action"
+    )
+
+    # Route the workflow to the correct action node
+    # based on the final recommended action.
+    workflow.add_conditional_edges(
+        "resolve_action",
+        route_recommended_action,
+        {
+            # Route each final agent decision
+            # to its corresponding action node.
+            "teach": "teach",
+            "assess": "assessment_router",
+            "practice": "practice",
+            "review": "review",
+            "recommend": "update_learning_path",
+        }
+    )
+
+
+    # Decide whether the learner needs a new
+    # assessment or is submitting existing answers.
+    workflow.add_conditional_edges(
+        "assessment_router",
+        route_assessment,
+        {
+            "generate_assessment": "generate_assessment",
+            "submit_assessment": "submit_assessment",
+        }
+    )
+
+    # After marking the current topic as completed,
+    # continue to the recommendation workflow.
+    workflow.add_edge(
+        "update_learning_path",
+        "recommend"
+    )
+    # End the workflow after the selected action node runs.
+    workflow.add_edge(
+        "teach",
+        END
+    )
+
+    # End after generating a new assessment.
+    # The workflow waits for the learner to answer.
+    workflow.add_edge(
+        "generate_assessment",
+        END
+    )
+
+    # End after processing submitted answers
+    # and updating the learner's mastery.
+    workflow.add_edge(
+        "submit_assessment",
+        END
+    )
+
+    workflow.add_edge(
+        "practice",
+        END
+    )
+
+    workflow.add_edge(
+        "review",
+        END
+    )
+
+    workflow.add_edge(
+        "recommend",
+        END
+    )
+
+        # End after generating the initial diagnostic.
+    # The workflow waits for the learner to submit answers.
+    workflow.add_edge(
+        "generate_initial_diagnostic",
+        END
+    )
+
+    # End after processing the diagnostic
+    # and creating the personalized learning path.
+    workflow.add_edge(
+        "submit_initial_diagnostic",
+        END
+    )
+
+    # Compile the workflow into an executable graph.
+    return workflow.compile()
