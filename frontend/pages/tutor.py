@@ -548,10 +548,6 @@ def render():
                         str(answer)
                     )
 
-            # Temporary E2E routing information.
-            st.caption(
-                "Agent action: practice"
-            )
 
         # Store a readable version in chat history.
         practice_history_parts = [
@@ -599,9 +595,3 @@ def render():
         st.markdown(
             tutor_response
         )
-
-        # Temporary E2E routing information.
-        if agent_action:
-            st.caption(
-                f"Agent action: {agent_action}"
-            )

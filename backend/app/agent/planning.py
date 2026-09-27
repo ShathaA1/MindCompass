@@ -20,7 +20,7 @@ def determine_learner_need(
     ).lower()
 
     # If the learner asks for an explanation,
-    # choose the explain action
+    # choose the explain action.
     if any(
         keyword in user_message
         for keyword in [
@@ -28,12 +28,15 @@ def determine_learner_need(
             "understand",
             "what is",
             "how does",
+            "how do",
+            "tell me about",
+            "clarify",
         ]
     ):
         learner_need = "explain"
 
     # If the learner asks for a quiz or assessment,
-    # choose the assess action
+    # choose the assess action.
     elif any(
         keyword in user_message
         for keyword in [
@@ -41,42 +44,50 @@ def determine_learner_need(
             "test me",
             "assess",
             "assessment",
+            "questions",
+            "check my understanding",
         ]
     ):
         learner_need = "assess"
 
     # If the learner asks to practice,
-    # choose the practice action
+    # choose the practice action.
     elif any(
         keyword in user_message
         for keyword in [
             "practice",
             "exercise",
             "example",
+            "give me practice",
+            "try some",
         ]
     ):
         learner_need = "practice"
 
     # If the learner asks to review previous material,
-    # choose the review action
+    # choose the review action.
     elif any(
         keyword in user_message
         for keyword in [
             "review",
             "revise",
             "recap",
+            "summarize",
+            "go over",
         ]
     ):
         learner_need = "review"
 
     # If the learner asks what to do next,
-    # choose the recommendation action
+    # choose the recommendation action.
     elif any(
         keyword in user_message
         for keyword in [
             "next",
             "recommend",
             "what should i learn",
+            "what should i do",
+            "continue",
         ]
     ):
         learner_need = "recommend"

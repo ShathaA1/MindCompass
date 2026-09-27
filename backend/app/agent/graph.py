@@ -399,9 +399,8 @@ def build_tutor_graph():
         resolve_action
     )
 
-    # Add placeholder action nodes.
-    # These will later be replaced with the real
-    # teaching, assessment, practice, and review logic.
+    # Add the main Tutor action nodes for
+    # teaching, assessment, practice, and review.
     workflow.add_node(
         "teach",
         teach_node
@@ -598,50 +597,20 @@ def build_tutor_graph():
     return workflow.compile()
 
 
-
-def prepare_teaching_inputs(
+def prepare_personalized_inputs(
     state: TutorState
 ) -> dict:
     """
-    Prepare learner, topic, mastery, preferences,
-    conversation context, and user request information
-    required for a personalized explanation.
+    Prepare the shared learner, topic, mastery,
+    preference, conversation, and request data
+    used by personalized Tutor actions.
     """
 
-    # Load the learner's current topic.
     current_topic = state.get(
         "current_topic",
         {}
     )
 
-    # Load learner profile and preferences.
-    learner_context = state.get(
-        "learner_context",
-        {}
-    )
-
-    # Load the learner's current mastery
-    # information for this topic.
-    topic_mastery = state.get(
-        "topic_mastery",
-        {}
-    )
-
-    # Load recent conversation history so the
-    # explanation can remain context-aware.
-    conversation_history = state.get(
-        "conversation_history",
-        []
-    )
-
-    # Load the learner's current request so RAG
-    # can retrieve material relevant to the question.
-    user_message = state.get(
-        "user_message",
-        ""
-    )
-
-    # Teaching requires an active topic.
     if not current_topic:
         return {}
 
@@ -653,50 +622,122 @@ def prepare_teaching_inputs(
         "name"
     )
 
-    # Stop safely if the topic information
-    # is incomplete.
     if not topic_id or not topic_name:
         return {}
 
-    # Prefer the learner's latest assessed level.
+    learner_context = state.get(
+        "learner_context",
+        {}
+    )
+
+    topic_mastery = state.get(
+        "topic_mastery",
+        {}
+    )
+
     student_level = (
         learner_context.get("current_level")
         or learner_context.get("initial_level")
         or "beginner"
     )
 
-    # Load current mastery information.
-    mastery_score = topic_mastery.get(
-        "mastery_score"
-    )
-
-    weak_areas = topic_mastery.get(
-        "weak_areas",
-        []
-    )
-
-    # Load the learner's preferred learning format
-    # and pace from the learner profile.
-    preferred_format = learner_context.get(
-        "preferred_format"
-    )
-
-    preferred_pace = learner_context.get(
-        "preferred_pace"
-    )
-
     return {
         "topic_id": topic_id,
         "topic_name": topic_name,
         "student_level": student_level,
-        "mastery_score": mastery_score,
-        "weak_areas": weak_areas,
-        "preferred_format": preferred_format,
-        "preferred_pace": preferred_pace,
-        "conversation_history": conversation_history,
-        "user_message": user_message,
+        "mastery_score": topic_mastery.get(
+            "mastery_score"
+        ),
+        "weak_areas": topic_mastery.get(
+            "weak_areas",
+            []
+        ),
+        "preferred_format": learner_context.get(
+            "preferred_format"
+        ),
+        "preferred_pace": learner_context.get(
+            "preferred_pace"
+        ),
+        "conversation_history": state.get(
+            "conversation_history",
+            []
+        ),
+        "user_message": state.get(
+            "user_message",
+            ""
+        ),
     }
 
+
+
+def prepare_teaching_inputs(
+    state: TutorState
+) -> dict:
+    """
+    Prepare personalized inputs for teaching.
+    """
+
+    return prepare_personalized_inputs(
+        state
+    )
+
+def normalize_weak_areas(
+    weak_areas: list | None
+) -> list[str]:
+    """
+    Convert weak-area values into a clean list
+    of learner-facing area names.
+    """
+
+    normalized_areas = []
+
+    for weak_area in weak_areas or []:
+        if isinstance(weak_area, dict):
+            area_name = weak_area.get(
+                "area"
+            )
+
+            if area_name:
+                normalized_areas.append(
+                    area_name
+                )
+        else:
+            normalized_areas.append(
+                str(weak_area)
+            )
+
+    return normalized_areas
+
+
+def format_conversation_history(
+    conversation_history: list[dict] | None
+) -> str:
+    """
+    Convert recent conversation history into a
+    compact text block for Tutor personalization.
+    """
+
+    history_parts = []
+
+    for message in conversation_history or []:
+        role = message.get(
+            "role",
+            "unknown"
+        )
+
+        content = message.get(
+            "content",
+            ""
+        )
+
+        if content:
+            history_parts.append(
+                f"{role}: {content}"
+            )
+
+    return " | ".join(
+        history_parts
+    )
 
 
 def teach_node(
@@ -754,35 +795,18 @@ def teach_node(
             f"{mastery_score:.0f}%."
         )
 
-    weak_areas = teaching_inputs.get(
-        "weak_areas",
-        []
+    weak_area_names = normalize_weak_areas(
+        teaching_inputs.get(
+            "weak_areas"
+        )
     )
 
-    if weak_areas:
-        weak_area_names = []
-
-        for weak_area in weak_areas:
-            if isinstance(weak_area, dict):
-                area_name = weak_area.get(
-                    "area"
-                )
-
-                if area_name:
-                    weak_area_names.append(
-                        area_name
-                    )
-            else:
-                weak_area_names.append(
-                    str(weak_area)
-                )
-
-        if weak_area_names:
-            personalization_parts.append(
-                "Focus especially on these weak areas: "
-                + ", ".join(weak_area_names)
-                + "."
-            )
+    if weak_area_names:
+        personalization_parts.append(
+            "Focus especially on these weak areas: "
+            + ", ".join(weak_area_names)
+            + "."
+    )
 
     preferred_format = teaching_inputs.get(
         "preferred_format"
@@ -818,35 +842,17 @@ def teach_node(
 
     # Include recent conversation context so the
     # explanation remains consistent across turns.
-    conversation_history = teaching_inputs.get(
-        "conversation_history",
-        []
+    conversation_context = format_conversation_history(
+        teaching_inputs.get(
+            "conversation_history"
+        )
     )
 
-    if conversation_history:
-        history_parts = []
-
-        for message in conversation_history:
-            role = message.get(
-                "role",
-                "unknown"
-            )
-
-            content = message.get(
-                "content",
-                ""
-            )
-
-            if content:
-                history_parts.append(
-                    f"{role}: {content}"
-                )
-
-        if history_parts:
-            personalization_parts.append(
-                "Recent conversation context: "
-                + " | ".join(history_parts)
-            )
+    if conversation_context:
+        personalization_parts.append(
+            "Recent conversation context: "
+            + conversation_context
+        )
 
 
     personalized_topic = " ".join(
@@ -1413,27 +1419,11 @@ def generate_assessment_node(
             f"{mastery_score:.0f}%."
         )
 
-    weak_areas = assessment_inputs.get(
-        "weak_areas",
-        []
+    weak_area_names = normalize_weak_areas(
+        assessment_inputs.get(
+            "weak_areas"
+        )
     )
-
-    weak_area_names = []
-
-    for weak_area in weak_areas:
-        if isinstance(weak_area, dict):
-            area_name = weak_area.get(
-                "area"
-            )
-
-            if area_name:
-                weak_area_names.append(
-                    area_name
-                )
-        else:
-            weak_area_names.append(
-                str(weak_area)
-            )
 
     if weak_area_names:
         assessment_topic_parts.append(
@@ -1872,99 +1862,12 @@ def prepare_practice_inputs(
     state: TutorState
 ) -> dict:
     """
-    Prepare learner, topic, mastery, preferences,
-    and user request information required for
-    personalized practice.
+    Prepare personalized inputs for practice.
     """
 
-    # Load the learner's current topic.
-    current_topic = state.get(
-        "current_topic",
-        {}
+    return prepare_personalized_inputs(
+        state
     )
-
-    # Load learner profile information.
-    learner_context = state.get(
-        "learner_context",
-        {}
-    )
-
-    # Load mastery information for the
-    # learner's current topic.
-    topic_mastery = state.get(
-        "topic_mastery",
-        {}
-    )
-
-    # Load the learner's current request so RAG
-    # can retrieve material relevant to the request.
-    user_message = state.get(
-        "user_message",
-        ""
-    )
-
-    # Load recent conversation history so practice
-    # can remain consistent with previous tutor turns.
-    conversation_history = state.get(
-        "conversation_history",
-        []
-    )
-
-    # Practice requires an active topic.
-    if not current_topic:
-        return {}
-
-    topic_id = current_topic.get(
-        "topic_id"
-    )
-
-    topic_name = current_topic.get(
-        "name"
-    )
-
-    # Stop safely if the topic information
-    # is incomplete.
-    if not topic_id or not topic_name:
-        return {}
-
-    # Prefer the learner's current assessed level.
-    # Fall back to the initial self-reported level.
-    student_level = (
-        learner_context.get("current_level")
-        or learner_context.get("initial_level")
-        or "beginner"
-    )
-
-    # Load learner mastery information.
-    mastery_score = topic_mastery.get(
-        "mastery_score"
-    )
-
-    weak_areas = topic_mastery.get(
-        "weak_areas",
-        []
-    )
-
-    # Load learner preferences from the profile.
-    preferred_format = learner_context.get(
-        "preferred_format"
-    )
-
-    preferred_pace = learner_context.get(
-        "preferred_pace"
-    )
-
-    return {
-        "topic_id": topic_id,
-        "topic_name": topic_name,
-        "student_level": student_level,
-        "mastery_score": mastery_score,
-        "weak_areas": weak_areas,
-        "preferred_format": preferred_format,
-        "preferred_pace": preferred_pace,
-        "conversation_history": conversation_history,
-        "user_message": user_message,
-    }
 
 def select_practice_type(
     topic_name: str,
@@ -2143,35 +2046,17 @@ def practice_node(
 
     # Include recent conversation context so practice
     # can build on what the learner discussed previously.
-    conversation_history = practice_inputs.get(
-        "conversation_history",
-        []
+    conversation_context = format_conversation_history(
+        practice_inputs.get(
+            "conversation_history"
+        )
     )
 
-    if conversation_history:
-        history_parts = []
-
-        for message in conversation_history:
-            role = message.get(
-                "role",
-                "unknown"
-            )
-
-            content = message.get(
-                "content",
-                ""
-            )
-
-            if content:
-                history_parts.append(
-                    f"{role}: {content}"
-                )
-
-        if history_parts:
-            personalization_parts.append(
-                "Recent conversation context: "
-                + " | ".join(history_parts)
-            )
+    if conversation_context:
+        personalization_parts.append(
+            "Recent conversation context: "
+            + conversation_context
+        )
 
     personalized_topic = " ".join(
         personalization_parts
@@ -2215,99 +2100,12 @@ def prepare_review_inputs(
     state: TutorState
 ) -> dict:
     """
-    Prepare learner, topic, mastery, preferences,
-    and user request information required for
-    a personalized review.
+    Prepare personalized inputs for review.
     """
 
-    # Load the learner's current topic.
-    current_topic = state.get(
-        "current_topic",
-        {}
+    return prepare_personalized_inputs(
+        state
     )
-
-    # Load learner profile information.
-    learner_context = state.get(
-        "learner_context",
-        {}
-    )
-
-    # Load mastery information for the
-    # learner's current topic.
-    topic_mastery = state.get(
-        "topic_mastery",
-        {}
-    )
-
-    # Load the learner's current request so RAG
-    # can retrieve material relevant to the review.
-    user_message = state.get(
-        "user_message",
-        ""
-    )
-
-    # Load recent conversation history so review
-    # can refer back to earlier explanations and questions.
-    conversation_history = state.get(
-        "conversation_history",
-        []
-    )
-
-    # Review requires an active topic.
-    if not current_topic:
-        return {}
-
-    topic_id = current_topic.get(
-        "topic_id"
-    )
-
-    topic_name = current_topic.get(
-        "name"
-    )
-
-    # Stop safely if the topic information
-    # is incomplete.
-    if not topic_id or not topic_name:
-        return {}
-
-    # Prefer the learner's current assessed level.
-    # Fall back to the initial self-reported level.
-    student_level = (
-        learner_context.get("current_level")
-        or learner_context.get("initial_level")
-        or "beginner"
-    )
-
-    # Load current mastery information.
-    mastery_score = topic_mastery.get(
-        "mastery_score"
-    )
-
-    weak_areas = topic_mastery.get(
-        "weak_areas",
-        []
-    )
-
-    # Load learner preferences from the profile.
-    preferred_format = learner_context.get(
-        "preferred_format"
-    )
-
-    preferred_pace = learner_context.get(
-        "preferred_pace"
-    )
-
-    return {
-        "topic_id": topic_id,
-        "topic_name": topic_name,
-        "student_level": student_level,
-        "mastery_score": mastery_score,
-        "weak_areas": weak_areas,
-        "preferred_format": preferred_format,
-        "preferred_pace": preferred_pace,
-        "conversation_history": conversation_history,
-        "user_message": user_message,
-    }
 
 
 def review_node(
@@ -2365,29 +2163,11 @@ def review_node(
             f"{mastery_score:.0f}%."
         )
 
-    weak_areas = review_inputs.get(
-        "weak_areas",
-        []
+    weak_area_names = normalize_weak_areas(
+        review_inputs.get(
+            "weak_areas"
+        )
     )
-
-    # Normalize weak areas because they may be stored
-    # either as strings or structured dictionaries.
-    weak_area_names = []
-
-    for weak_area in weak_areas:
-        if isinstance(weak_area, dict):
-            area_name = weak_area.get(
-                "area"
-            )
-
-            if area_name:
-                weak_area_names.append(
-                    area_name
-                )
-        else:
-            weak_area_names.append(
-                str(weak_area)
-            )
 
     if weak_area_names:
         review_parts.append(
@@ -2400,6 +2180,7 @@ def review_node(
             "Summarize the key concepts of the topic "
             "and reinforce the most important ideas."
         )
+        
 
     preferred_format = review_inputs.get(
         "preferred_format"
@@ -2434,35 +2215,17 @@ def review_node(
 
     # Include recent conversation context so review
     # can reinforce material discussed earlier.
-    conversation_history = review_inputs.get(
-        "conversation_history",
-        []
+    conversation_context = format_conversation_history(
+        review_inputs.get(
+            "conversation_history"
+        )
     )
 
-    if conversation_history:
-        history_parts = []
-
-        for message in conversation_history:
-            role = message.get(
-                "role",
-                "unknown"
-            )
-
-            content = message.get(
-                "content",
-                ""
-            )
-
-            if content:
-                history_parts.append(
-                    f"{role}: {content}"
-                )
-
-        if history_parts:
-            review_parts.append(
-                "Recent conversation context: "
-                + " | ".join(history_parts)
-            )
+    if conversation_context:
+        review_parts.append(
+            "Recent conversation context: "
+            + conversation_context
+        )
 
 
     review_topic = " ".join(
