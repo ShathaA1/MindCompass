@@ -2054,8 +2054,8 @@ def test_submit_assessment_node(monkeypatch):
     """
     The assessment submission node should evaluate
     learner responses, save the result, reload the
-    updated topic mastery, and return the completed
-    assessment result.
+    updated topic mastery, synchronize the learning
+    path item, and return the completed result.
     """
 
     state = {
@@ -2113,8 +2113,11 @@ def test_submit_assessment_node(monkeypatch):
     # does not modify PostgreSQL.
     monkeypatch.setattr(
         "app.agent.graph.save_assessment_result",
-        lambda db, user_id, topic_id,
-        assessment_type, questions: FakeAssessmentAttempt()
+        lambda db,
+        user_id,
+        topic_id,
+        assessment_type,
+        questions: FakeAssessmentAttempt()
     )
 
     # Mock the updated mastery that would normally
@@ -2130,6 +2133,33 @@ def test_submit_assessment_node(monkeypatch):
         lambda db, user_id, topic_id: updated_mastery
     )
 
+    # Mock the learner's active learning path.
+    monkeypatch.setattr(
+        "app.agent.graph.get_active_learning_path",
+        lambda db, user_id: {
+            "learning_path_id": 50,
+            "user_id": user_id,
+            "name": "Agentic AI Learning Path",
+            "status": "active",
+        }
+    )
+
+    # Simulate synchronization of the current
+    # learning path item after high mastery.
+    monkeypatch.setattr(
+        "app.agent.graph.update_learning_path",
+        lambda db,
+        user_id,
+        learning_path_id,
+        topic_id: {
+            "learning_path_item_id": 200,
+            "learning_path_id": learning_path_id,
+            "topic_id": topic_id,
+            "status": "completed",
+            "recommended_action": "recommend",
+        }
+    )
+
     # Run the assessment submission node.
     result = submit_assessment_node(state)
 
@@ -2143,6 +2173,7 @@ def test_submit_assessment_node(monkeypatch):
     # Verify that the updated topic mastery
     # is returned to TutorState.
     assert result["topic_mastery"] == updated_mastery
+
     assert (
         result["topic_mastery"]["mastery_score"]
         == 100.0
@@ -2154,17 +2185,175 @@ def test_submit_assessment_node(monkeypatch):
 
     assert result["recommendation_reason"]
 
+    # Verify that the learning path item was
+    # synchronized with the latest mastery.
+    assert (
+        result["current_topic"]["status"]
+        == "completed"
+    )
+
+    assert (
+        result["current_topic"]["recommended_action"]
+        == "recommend"
+    )
+
     # Verify the final response shown
     # after assessment submission.
     assert "Assessment completed" in result["response"]
     assert "1/1" in result["response"]
 
-
     # Verify that the learner sees the updated
     # mastery and recommended next step.
     assert "Mastery: 100%" in result["response"]
-    assert "Recommended next step: recommend" in result["response"]
+    assert (
+        "Recommended next step: recommend"
+        in result["response"]
+    )
 
+
+def test_submit_assessment_node_low_mastery(monkeypatch):
+    """
+    A low assessment mastery should keep the
+    current topic pending and recommend explanation.
+    """
+
+    state = {
+        "user_id": 2,
+        "current_topic": {
+            "topic_id": 27,
+            "name": "Python Reference Material",
+            "status": "completed",
+        },
+        "assessment_type": "topic",
+        "assessment_questions": [
+            {
+                "topic_id": 27,
+                "question_text": (
+                    "What does a = 4 do?"
+                ),
+                "question_type": "multiple_choice",
+                "options": ["A", "B", "C", "D"],
+                "correct_answer": "B",
+            }
+        ],
+        "assessment_answers": [
+            {
+                "learner_answer": "A",
+            }
+        ],
+    }
+
+    # Simulate an incorrect learner response.
+    evaluated_responses = [
+        {
+            "topic_id": 27,
+            "question_text": (
+                "What does a = 4 do?"
+            ),
+            "question_type": "multiple_choice",
+            "options": ["A", "B", "C", "D"],
+            "correct_answer": "B",
+            "learner_answer": "A",
+            "is_correct": False,
+            "score_awarded": 0,
+            "feedback": "Incorrect answer.",
+        }
+    ]
+
+    monkeypatch.setattr(
+        "app.agent.graph.evaluate_assessment_responses",
+        lambda responses: evaluated_responses
+    )
+
+    # Create a fake low-scoring assessment attempt.
+    class FakeAssessmentAttempt:
+        assessment_attempt_id = 201
+        score = 0
+        max_score = 1
+
+    monkeypatch.setattr(
+        "app.agent.graph.save_assessment_result",
+        lambda db,
+        user_id,
+        topic_id,
+        assessment_type,
+        questions: FakeAssessmentAttempt()
+    )
+
+    # Simulate the new mastery produced
+    # after the low assessment score.
+    updated_mastery = {
+        "mastery_score": 20.0,
+        "weak_areas": [
+            "Variable assignment"
+        ],
+        "last_assessed_at": None,
+    }
+
+    monkeypatch.setattr(
+        "app.agent.graph.get_topic_mastery",
+        lambda db, user_id, topic_id: updated_mastery
+    )
+
+    # Mock the learner's active learning path.
+    monkeypatch.setattr(
+        "app.agent.graph.get_active_learning_path",
+        lambda db, user_id: {
+            "learning_path_id": 50,
+            "user_id": user_id,
+            "name": "Agentic AI Learning Path",
+            "status": "active",
+        }
+    )
+
+    # Simulate synchronization after mastery falls
+    # below the topic completion threshold.
+    monkeypatch.setattr(
+        "app.agent.graph.update_learning_path",
+        lambda db,
+        user_id,
+        learning_path_id,
+        topic_id: {
+            "learning_path_item_id": 300,
+            "learning_path_id": learning_path_id,
+            "topic_id": topic_id,
+            "status": "pending",
+            "recommended_action": "explain",
+        }
+    )
+
+    result = submit_assessment_node(state)
+
+    # Verify that the low mastery is returned.
+    assert (
+        result["topic_mastery"]["mastery_score"]
+        == 20.0
+    )
+
+    # Verify that the learner should remain
+    # in the explanation stage.
+    assert result["recommended_action"] == "explain"
+
+    # Verify that the current topic is no longer
+    # treated as completed.
+    assert (
+        result["current_topic"]["status"]
+        == "pending"
+    )
+
+    assert (
+        result["current_topic"]["recommended_action"]
+        == "explain"
+    )
+
+    # Verify the response reflects the new result.
+    assert "Assessment completed" in result["response"]
+    assert "Mastery: 20%" in result["response"]
+
+    assert (
+        "Recommended next step: explain"
+        in result["response"]
+    )
 
 
 def test_submit_assessment_node_incomplete_answers():
@@ -2193,7 +2382,141 @@ def test_submit_assessment_node_incomplete_answers():
     result = submit_assessment_node(state)
 
     assert result.get("assessment_result") is None
-    assert "answers are incomplete" in result["response"]
+
+    assert (
+        "answers are incomplete"
+        in result["response"]
+    )
+
+def test_submit_assessment_updates_path_after_low_mastery(
+    monkeypatch
+):
+    """
+    A low assessment mastery should return the current
+    learning path item to pending and recommend explanation.
+    """
+
+    state = {
+        "user_id": 2,
+        "current_topic": {
+            "topic_id": 27,
+            "name": "Python Reference Material",
+            "status": "completed",
+        },
+        "assessment_type": "topic",
+        "assessment_questions": [
+            {
+                "topic_id": 27,
+                "question_text": "What does a = 4 do?",
+                "question_type": "multiple_choice",
+                "options": ["A", "B", "C", "D"],
+                "correct_answer": "B",
+            }
+        ],
+        "assessment_answers": [
+            {
+                "learner_answer": "A",
+            }
+        ],
+    }
+
+    evaluated_responses = [
+        {
+            "topic_id": 27,
+            "question_text": "What does a = 4 do?",
+            "question_type": "multiple_choice",
+            "options": ["A", "B", "C", "D"],
+            "correct_answer": "B",
+            "learner_answer": "A",
+            "is_correct": False,
+            "score_awarded": 0,
+            "feedback": "Incorrect answer.",
+        }
+    ]
+
+    monkeypatch.setattr(
+        "app.agent.graph.evaluate_assessment_responses",
+        lambda responses: evaluated_responses
+    )
+
+    class FakeAssessmentAttempt:
+        assessment_attempt_id = 200
+        score = 0
+        max_score = 1
+
+    monkeypatch.setattr(
+        "app.agent.graph.save_assessment_result",
+        lambda db,
+        user_id,
+        topic_id,
+        assessment_type,
+        questions: FakeAssessmentAttempt()
+    )
+
+    updated_mastery = {
+        "mastery_score": 20.0,
+        "weak_areas": [
+            "Variable assignment"
+        ],
+        "last_assessed_at": None,
+    }
+
+    monkeypatch.setattr(
+        "app.agent.graph.get_topic_mastery",
+        lambda db,
+        user_id,
+        topic_id: updated_mastery
+    )
+
+    monkeypatch.setattr(
+        "app.agent.graph.get_active_learning_path",
+        lambda db, user_id: {
+            "learning_path_id": 50,
+            "user_id": user_id,
+            "name": "Agentic AI Learning Path",
+            "status": "active",
+        }
+    )
+
+    # Simulate the path synchronization expected
+    # after mastery drops below the completion threshold.
+    monkeypatch.setattr(
+        "app.agent.graph.update_learning_path",
+        lambda db,
+        user_id,
+        learning_path_id,
+        topic_id: {
+            "learning_path_item_id": 300,
+            "learning_path_id": learning_path_id,
+            "topic_id": topic_id,
+            "status": "pending",
+            "recommended_action": "explain",
+        }
+    )
+
+    result = submit_assessment_node(state)
+
+    assert (
+        result["topic_mastery"]["mastery_score"]
+        == 20.0
+    )
+
+    assert (
+        result["recommended_action"]
+        == "explain"
+    )
+
+    assert (
+        result["current_topic"]["status"]
+        == "pending"
+    )
+
+    assert (
+        result["current_topic"]["recommended_action"]
+        == "explain"
+    )
+
+    assert "Mastery: 20%" in result["response"]
 
 
 def test_route_assessment_to_generate():

@@ -1351,7 +1351,8 @@ def submit_assessment_node(
 ) -> dict:
     """
     Evaluate the learner's submitted assessment answers,
-    save the assessment result, and update topic mastery.
+    save the assessment result, update topic mastery,
+    and synchronize the current learning path item.
     """
 
     # Combine the generated questions with
@@ -1386,6 +1387,14 @@ def submit_assessment_node(
         "topic_id"
     )
 
+    if not topic_id:
+        return {
+            "response": (
+                "The assessment could not be submitted "
+                "because the current topic is missing."
+            )
+        }
+
     # Get the assessment type used
     # for this assessment.
     assessment_type = state.get(
@@ -1393,9 +1402,10 @@ def submit_assessment_node(
         "topic"
     )
 
-    # Save the completed assessment and update
-    # the learner's topic mastery in the database.
+    # Save the completed assessment, update mastery,
+    # and synchronize the learner's learning path.
     with SessionLocal() as db:
+
         attempt = save_assessment_result(
             db=db,
             user_id=state["user_id"],
@@ -1406,7 +1416,6 @@ def submit_assessment_node(
 
         # Reload the learner's updated mastery after
         # the assessment result has been saved.
-        
         updated_topic_mastery = get_topic_mastery(
             db=db,
             user_id=state["user_id"],
@@ -1425,6 +1434,35 @@ def submit_assessment_node(
             )
         )
 
+        # Load the learner's active learning path so
+        # the current path item can be synchronized
+        # with the latest assessment result.
+        active_learning_path = get_active_learning_path(
+            db=db,
+            user_id=state["user_id"]
+        )
+
+        updated_path_item = {}
+
+        if active_learning_path:
+            learning_path_id = active_learning_path.get(
+                "learning_path_id"
+            )
+
+            if learning_path_id:
+                # Update the current path item using
+                # the learner's latest mastery score.
+                #
+                # For example:
+                # mastery below 85 keeps the topic pending,
+                # while mastery of 85 or higher completes it.
+                updated_path_item = update_learning_path(
+                    db=db,
+                    user_id=state["user_id"],
+                    learning_path_id=learning_path_id,
+                    topic_id=topic_id
+                )
+
         # Store only the information needed by
         # the Tutor Agent after submission.
         assessment_result = {
@@ -1435,9 +1473,28 @@ def submit_assessment_node(
             "max_score": attempt.max_score,
         }
 
+    # Keep the current topic synchronized with
+    # the updated learning path item when available.
+    updated_current_topic = {
+        **current_topic,
+    }
+
+    if updated_path_item:
+        updated_current_topic.update({
+            "status": updated_path_item.get(
+                "status"
+            ),
+            "recommended_action": (
+                updated_path_item.get(
+                    "recommended_action"
+                )
+            ),
+        })
+
     return {
         "assessment_result": assessment_result,
         "topic_mastery": updated_topic_mastery,
+        "current_topic": updated_current_topic,
         "recommended_action": recommendation[
             "recommended_action"
         ],
