@@ -20,7 +20,6 @@ from app.agent.graph import (
     review_node,
     generate_initial_diagnostic_node,
     submit_initial_diagnostic_node,
-    route_initial_setup,
     route_tutor_entry,
     select_practice_type,
     prepare_personalized_inputs,
@@ -1749,12 +1748,14 @@ def test_prepare_assessment_inputs():
 
     result = prepare_assessment_inputs(state)
 
-    assert result["topics"] == [
-        {
-            "topic_id": 12,
-            "topic": "Building Your First Agent",
-        }
-    ]
+    assert result["topic_id"] == 12
+    assert result["topic_name"] == "Building Your First Agent"
+    assert result["student_level"] == "intermediate"
+    assert result["assessment_type"] == "topic"
+    assert result["user_message"] == (
+        "Test me on tool usage in AI agents."
+    )
+
 
     assert result["student_level"] == "intermediate"
     assert result["assessment_type"] == "topic"
@@ -3891,7 +3892,7 @@ def test_submit_initial_diagnostic_incomplete_answers():
     )
 
 
-def test_route_initial_setup_to_normal_tutor():
+def test_route_tutor_entry_to_normal_tutor():
     """
     Test that an existing learner without a newly
     selected path continues to the normal tutor flow.
@@ -3904,12 +3905,12 @@ def test_route_initial_setup_to_normal_tutor():
         },
     }
 
-    result = route_initial_setup(state)
+    result = route_tutor_entry(state)
 
     assert result == "continue_tutor"
 
 
-def test_route_initial_setup_to_generate_diagnostic():
+def test_route_tutor_entry_to_generate_diagnostic():
     """
     Test that selecting a new learning path
     starts the initial diagnostic generation flow.
@@ -3920,12 +3921,12 @@ def test_route_initial_setup_to_generate_diagnostic():
         "selected_path": "agentic_ai",
     }
 
-    result = route_initial_setup(state)
+    result = route_tutor_entry(state)
 
     assert result == "generate_initial_diagnostic"
 
 
-def test_route_initial_setup_to_submit_diagnostic():
+def test_route_tutor_entry_to_submit_diagnostic():
     """
     Test that diagnostic questions and answers
     route the learner to diagnostic submission.
@@ -3947,7 +3948,7 @@ def test_route_initial_setup_to_submit_diagnostic():
         ],
     }
 
-    result = route_initial_setup(state)
+    result = route_tutor_entry(state)
 
     assert result == "submit_initial_diagnostic"
 

@@ -252,46 +252,6 @@ def load_conversation_history_node(
 # Routing
 #----------------------------------------------------------
 
-def route_initial_setup(
-    state: TutorState
-) -> str:
-    """
-    Decide whether the learner should enter
-    the initial diagnostic flow or continue
-    with the normal Tutor Agent workflow.
-    """
-
-    # A selected path indicates that the learner
-    # is currently setting up a new learning path.
-    selected_path = state.get(
-        "selected_path"
-    )
-
-    if not selected_path:
-        return "continue_tutor"
-
-    # If diagnostic questions and learner answers
-    # are present, process the submitted diagnostic.
-    assessment_questions = state.get(
-        "assessment_questions",
-        []
-    )
-
-    assessment_answers = state.get(
-        "assessment_answers",
-        []
-    )
-
-    if (
-        assessment_questions
-        and assessment_answers
-    ):
-        return "submit_initial_diagnostic"
-
-    # Otherwise, generate the initial diagnostic
-    # for the selected learning path.
-    return "generate_initial_diagnostic"
-
 
 def route_tutor_entry(
     state: TutorState
@@ -1049,12 +1009,6 @@ def prepare_assessment_inputs(
 
     return {
         **base_inputs,
-        "topics": [
-            {
-                "topic_id": base_inputs["topic_id"],
-                "topic": base_inputs["topic_name"],
-            }
-        ],
         "assessment_type": (
             state.get("assessment_type")
             or "topic"
