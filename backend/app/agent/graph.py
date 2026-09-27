@@ -815,6 +815,40 @@ def teach_node(
             f"{user_message}"
         )
 
+
+    # Include recent conversation context so the
+    # explanation remains consistent across turns.
+    conversation_history = teaching_inputs.get(
+        "conversation_history",
+        []
+    )
+
+    if conversation_history:
+        history_parts = []
+
+        for message in conversation_history:
+            role = message.get(
+                "role",
+                "unknown"
+            )
+
+            content = message.get(
+                "content",
+                ""
+            )
+
+            if content:
+                history_parts.append(
+                    f"{role}: {content}"
+                )
+
+        if history_parts:
+            personalization_parts.append(
+                "Recent conversation context: "
+                + " | ".join(history_parts)
+            )
+
+
     personalized_topic = " ".join(
         personalization_parts
     )
@@ -1869,6 +1903,13 @@ def prepare_practice_inputs(
         ""
     )
 
+    # Load recent conversation history so practice
+    # can remain consistent with previous tutor turns.
+    conversation_history = state.get(
+        "conversation_history",
+        []
+    )
+
     # Practice requires an active topic.
     if not current_topic:
         return {}
@@ -1921,6 +1962,7 @@ def prepare_practice_inputs(
         "weak_areas": weak_areas,
         "preferred_format": preferred_format,
         "preferred_pace": preferred_pace,
+        "conversation_history": conversation_history,
         "user_message": user_message,
     }
 
@@ -2099,6 +2141,38 @@ def practice_node(
             f"{user_message}"
         )
 
+    # Include recent conversation context so practice
+    # can build on what the learner discussed previously.
+    conversation_history = practice_inputs.get(
+        "conversation_history",
+        []
+    )
+
+    if conversation_history:
+        history_parts = []
+
+        for message in conversation_history:
+            role = message.get(
+                "role",
+                "unknown"
+            )
+
+            content = message.get(
+                "content",
+                ""
+            )
+
+            if content:
+                history_parts.append(
+                    f"{role}: {content}"
+                )
+
+        if history_parts:
+            personalization_parts.append(
+                "Recent conversation context: "
+                + " | ".join(history_parts)
+            )
+
     personalized_topic = " ".join(
         personalization_parts
     )
@@ -2172,6 +2246,13 @@ def prepare_review_inputs(
         ""
     )
 
+    # Load recent conversation history so review
+    # can refer back to earlier explanations and questions.
+    conversation_history = state.get(
+        "conversation_history",
+        []
+    )
+
     # Review requires an active topic.
     if not current_topic:
         return {}
@@ -2224,6 +2305,7 @@ def prepare_review_inputs(
         "weak_areas": weak_areas,
         "preferred_format": preferred_format,
         "preferred_pace": preferred_pace,
+        "conversation_history": conversation_history,
         "user_message": user_message,
     }
 
@@ -2348,6 +2430,40 @@ def review_node(
             "The learner specifically requested: "
             f"{user_message}"
         )
+
+
+    # Include recent conversation context so review
+    # can reinforce material discussed earlier.
+    conversation_history = review_inputs.get(
+        "conversation_history",
+        []
+    )
+
+    if conversation_history:
+        history_parts = []
+
+        for message in conversation_history:
+            role = message.get(
+                "role",
+                "unknown"
+            )
+
+            content = message.get(
+                "content",
+                ""
+            )
+
+            if content:
+                history_parts.append(
+                    f"{role}: {content}"
+                )
+
+        if history_parts:
+            review_parts.append(
+                "Recent conversation context: "
+                + " | ".join(history_parts)
+            )
+
 
     review_topic = " ".join(
         review_parts

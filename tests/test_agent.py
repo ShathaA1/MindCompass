@@ -4910,3 +4910,310 @@ def test_submit_assessment_node_generates_personalized_feedback(
         result["assessment_feedback"]["recommendation"]
         == "Review the core concept."
     )
+
+
+def test_teach_node_uses_conversation_history(
+    monkeypatch
+):
+    """
+    The teaching node should include recent
+    conversation history in the personalized
+    explanation request.
+    """
+
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name, retrieval_query=None: (
+            "An AI agent can observe, reason, "
+            "and take actions toward a goal."
+        )
+    )
+
+    captured_inputs = {}
+
+    class FakeExplainTool:
+        def invoke(self, inputs):
+            captured_inputs.update(inputs)
+
+            return "Personalized explanation."
+
+    monkeypatch.setattr(
+        "app.agent.graph.explain",
+        FakeExplainTool()
+    )
+
+    state = {
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "current_level": "beginner",
+            "preferred_format": "detailed_explanations",
+            "preferred_pace": "slow",
+        },
+        "topic_mastery": {
+            "mastery_score": 40,
+            "weak_areas": [],
+        },
+        "conversation_history": [
+            {
+                "role": "user",
+                "content": "What is an AI agent?",
+            },
+            {
+                "role": "assistant",
+                "content": (
+                    "An AI agent can make decisions "
+                    "and take actions."
+                ),
+            },
+        ],
+        "user_message": (
+            "Can you explain that in more detail?"
+        ),
+    }
+
+    result = teach_node(
+        state
+    )
+
+    personalized_topic = captured_inputs[
+        "topic"
+    ]
+
+    assert (
+        "Recent conversation context:"
+        in personalized_topic
+    )
+
+    assert (
+        "user: What is an AI agent?"
+        in personalized_topic
+    )
+
+    assert (
+        "assistant: An AI agent can make decisions"
+        in personalized_topic
+    )
+
+    assert (
+        "Can you explain that in more detail?"
+        in personalized_topic
+    )
+
+    assert (
+        result["response"]
+        == "Personalized explanation."
+    )
+
+
+def test_practice_node_uses_conversation_history(
+    monkeypatch
+):
+    """
+    The practice node should include recent
+    conversation history in the personalized
+    practice request.
+    """
+
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name, retrieval_query=None: (
+            "Python functions can accept parameters "
+            "and return values."
+        )
+    )
+
+    captured_inputs = {}
+
+    class FakePracticeTool:
+        def invoke(self, inputs):
+            captured_inputs.update(inputs)
+
+            return json.dumps(
+                {
+                    "practice_type": inputs["practice_type"],
+                    "items": [
+                        {
+                            "prompt": "Complete the function.",
+                            "answer": "return x",
+                        }
+                        for _ in range(5)
+                    ],
+                }
+            )
+
+    monkeypatch.setattr(
+        "app.agent.graph.generate_practice",
+        FakePracticeTool()
+    )
+
+    state = {
+        "current_topic": {
+            "topic_id": 27,
+            "name": "Python Foundations",
+        },
+        "learner_context": {
+            "current_level": "beginner",
+            "preferred_format": "guided_practice",
+            "preferred_pace": "slow",
+        },
+        "topic_mastery": {
+            "mastery_score": 60,
+            "weak_areas": [],
+        },
+        "conversation_history": [
+            {
+                "role": "user",
+                "content": "Explain Python functions.",
+            },
+            {
+                "role": "assistant",
+                "content": (
+                    "A function is a reusable block of code."
+                ),
+            },
+        ],
+        "user_message": (
+            "Give me practice on what you just explained."
+        ),
+    }
+
+    result = practice_node(
+        state
+    )
+
+    personalized_topic = captured_inputs[
+        "topic"
+    ]
+
+    assert (
+        "Recent conversation context:"
+        in personalized_topic
+    )
+
+    assert (
+        "user: Explain Python functions."
+        in personalized_topic
+    )
+
+    assert (
+        "assistant: A function is a reusable block of code."
+        in personalized_topic
+    )
+
+    assert (
+        "Give me practice on what you just explained."
+        in personalized_topic
+    )
+
+    assert (
+        result["response"]
+        is not None
+    )
+
+
+def test_review_node_uses_conversation_history(
+    monkeypatch
+):
+    """
+    The review node should include recent
+    conversation history in the personalized
+    review request.
+    """
+
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name, retrieval_query=None: (
+            "An AI agent can observe, reason, "
+            "and act toward a goal."
+        )
+    )
+
+    captured_inputs = {}
+
+    class FakeExplainTool:
+        def invoke(self, inputs):
+            captured_inputs.update(inputs)
+
+            return "Personalized review."
+
+    monkeypatch.setattr(
+        "app.agent.graph.explain",
+        FakeExplainTool()
+    )
+
+    state = {
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "current_level": "intermediate",
+            "preferred_format": "detailed_explanations",
+            "preferred_pace": "moderate",
+        },
+        "topic_mastery": {
+            "mastery_score": 75,
+            "weak_areas": [
+                {
+                    "area": "Agent reasoning",
+                    "reason": "Needs reinforcement.",
+                }
+            ],
+        },
+        "conversation_history": [
+            {
+                "role": "user",
+                "content": (
+                    "What is the difference between "
+                    "reasoning and action?"
+                ),
+            },
+            {
+                "role": "assistant",
+                "content": (
+                    "Reasoning decides what to do, "
+                    "while action executes it."
+                ),
+            },
+        ],
+        "user_message": (
+            "Review what we discussed earlier."
+        ),
+    }
+
+    result = review_node(
+        state
+    )
+
+    review_topic = captured_inputs[
+        "topic"
+    ]
+
+    assert (
+        "Recent conversation context:"
+        in review_topic
+    )
+
+    assert (
+        "user: What is the difference between "
+        "reasoning and action?"
+        in review_topic
+    )
+
+    assert (
+        "assistant: Reasoning decides what to do"
+        in review_topic
+    )
+
+    assert (
+        "Review what we discussed earlier."
+        in review_topic
+    )
+
+    assert (
+        result["response"]
+        == "Personalized review."
+    )

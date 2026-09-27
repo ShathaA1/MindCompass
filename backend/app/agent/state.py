@@ -27,6 +27,7 @@ class TutorState(TypedDict, total=False):
     assessment_questions: list[dict[str, Any]]
     assessment_answers: list[dict[str, Any]]
     assessment_result: dict[str, Any]
+    assessment_feedback: dict[str, Any]
 
     # Initial learning path setup
     selected_path: str
