@@ -12,18 +12,16 @@ def determine_learner_need(
     based on the user message.
     """
 
-    # Convert the user message to lowercase
-    # to make keyword matching case-insensitive
+    # Normalize the learner message so keyword
+    # matching is case-insensitive.
     user_message = state.get(
         "user_message",
         ""
     ).lower()
 
-    # If the learner asks for an explanation,
-    # choose the explain action.
-    if any(
-        keyword in user_message
-        for keyword in [
+    # Define learner intents in priority order.
+    intent_keywords = {
+        "explain": [
             "explain",
             "understand",
             "what is",
@@ -31,116 +29,54 @@ def determine_learner_need(
             "how do",
             "tell me about",
             "clarify",
-        ]
-    ):
-        learner_need = "explain"
-
-    # If the learner asks for a quiz or assessment,
-    # choose the assess action.
-    elif any(
-        keyword in user_message
-        for keyword in [
+        ],
+        "assess": [
             "quiz",
             "test me",
             "assess",
             "assessment",
             "questions",
             "check my understanding",
-        ]
-    ):
-        learner_need = "assess"
-
-    # If the learner asks to practice,
-    # choose the practice action.
-    elif any(
-        keyword in user_message
-        for keyword in [
+        ],
+        "practice": [
             "practice",
             "exercise",
             "example",
             "give me practice",
             "try some",
-        ]
-    ):
-        learner_need = "practice"
-
-    # If the learner asks to review previous material,
-    # choose the review action.
-    elif any(
-        keyword in user_message
-        for keyword in [
+        ],
+        "review": [
             "review",
             "revise",
             "recap",
             "summarize",
             "go over",
-        ]
-    ):
-        learner_need = "review"
-
-    # If the learner asks what to do next,
-    # choose the recommendation action.
-    elif any(
-        keyword in user_message
-        for keyword in [
+        ],
+        "recommend": [
             "next",
             "recommend",
             "what should i learn",
             "what should i do",
             "continue",
-        ]
-    ):
-        learner_need = "recommend"
-
-    # Use recommendation as the default action
-    # when the request does not match another category
-    else:
-        learner_need = "recommend"
-
-    # Return the decision so LangGraph can merge it
-    # into the existing TutorState
-    return {
-        "learner_need": learner_need
+        ],
     }
 
+    # Check each intent in priority order
+    # and stop at the first matching category.
+    for learner_need, keywords in intent_keywords.items():
+        if any(
+            keyword in user_message
+            for keyword in keywords
+        ):
+            return {
+                "learner_need": learner_need
+            }
 
-def route_action(
-    state: TutorState
-) -> str:
-    """
-    Route the workflow based on the learner need
-    already determined by the agent.
-    """
-
-    # Read the learner need from TutorState
-    learner_need = state.get(
-        "learner_need",
-        "recommend"
-    )
-
-    # Route explanation requests
-    # to the teaching node
-    if learner_need == "explain":
-        return "teach"
-
-    # Route assessment requests
-    # to the assessment node
-    if learner_need == "assess":
-        return "assess"
-
-    # Route practice requests
-    # to the practice node
-    if learner_need == "practice":
-        return "practice"
-
-    # Route review requests
-    # to the review node
-    if learner_need == "review":
-        return "review"
-
-    # Route recommendation requests and unknown values
-    # to the recommendation node
-    return "recommend"
+    # Use recommendation when no explicit
+    # learner intent can be identified.
+    return {
+        "learner_need": "recommend"
+    }
 
 
 def plan_next_topic(
@@ -286,25 +222,19 @@ def route_recommended_action(
         "explain"
     )
 
-    # Route explanation actions to teaching.
-    if recommended_action == "explain":
-        return "teach"
+    # Map each supported action to its
+    # corresponding LangGraph node.
+    action_routes = {
+        "explain": "teach",
+        "assess": "assess",
+        "practice": "practice",
+        "review": "review",
+        "recommend": "recommend",
+    }
 
-    # Route assessment actions.
-    if recommended_action == "assess":
-        return "assess"
-
-    # Route practice actions.
-    if recommended_action == "practice":
-        return "practice"
-
-    # Route review actions.
-    if recommended_action == "review":
-        return "review"
-
-    if recommended_action == "recommend":
-        return "recommend"
-
-    # Use teaching as a safe default
-    # for unknown actions.
-    return "teach"
+    # Use teaching as a safe fallback
+    # when the action is unknown.
+    return action_routes.get(
+        recommended_action,
+        "teach"
+    )

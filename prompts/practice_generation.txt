@@ -43,37 +43,15 @@ Practice type instructions:
   Provide a clear question, concept, or term in "prompt".
   Provide a concise explanation or answer in "answer".
 
-- true_false:
-  Provide a clear factual statement in "prompt".
-  Set "answer" to exactly "True" or "False".
-
-- fill_blank:
-  Provide a sentence or code fragment containing one clear blank in "prompt".
-  Use "_____" to represent the missing part.
-  Provide only the expected missing concept or value in "answer".
-
 - short_answer:
   Provide a focused conceptual question in "prompt".
   Provide a concise expected answer in "answer".
-
-- code_completion:
-  Provide an incomplete code snippet in "prompt".
-  Use a clear placeholder such as "_____" for the missing code.
-  Ask the learner to complete only the missing part.
-  Provide the expected code in "answer".
-  Keep the code appropriate for the learner's level.
 
 - coding:
   Provide a small coding task in "prompt".
   The task should require the learner to write code using concepts supported by the learning context.
   Provide one valid expected solution in "answer".
   Keep the task small enough for focused practice.
-
-- debugging:
-  Provide a short code snippet containing a meaningful error in "prompt".
-  Ask the learner to identify or fix the error.
-  Provide the corrected code or expected fix in "answer".
-  The error must relate directly to concepts supported by the learning context.
 
 - scenario:
   Provide a short practical situation or decision-making problem in "prompt".

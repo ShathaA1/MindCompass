@@ -26,7 +26,6 @@ from app.agent.graph import (
 )
 from app.agent.planning import (
     determine_learner_need,
-    route_action,
     plan_next_topic,
     recommend_next_action,
     resolve_action,
@@ -226,114 +225,6 @@ def test_determine_learner_need_default():
 
     # Verify the default behavior
     assert result["learner_need"] == "recommend"
-
-
-def test_route_action_explain():
-    """
-    Test that explain requests are routed
-    to the teaching node.
-    """
-
-    # Create a state with an explain decision
-    state = {
-        "learner_need": "explain"
-    }
-
-    # Route the action
-    result = route_action(state)
-
-    # Verify the correct destination
-    assert result == "teach"
-
-
-def test_route_action_assess():
-    """
-    Test that assessment requests are routed
-    to the assessment node.
-    """
-
-    # Create a state with an assess decision
-    state = {
-        "learner_need": "assess"
-    }
-
-    # Route the action
-    result = route_action(state)
-
-    # Verify the correct destination
-    assert result == "assess"
-
-
-def test_route_action_practice():
-    """
-    Test that practice requests are routed
-    to the practice node.
-    """
-
-    # Create a state with a practice decision
-    state = {
-        "learner_need": "practice"
-    }
-
-    # Route the action
-    result = route_action(state)
-
-    # Verify the correct destination
-    assert result == "practice"
-
-
-def test_route_action_review():
-    """
-    Test that review requests are routed
-    to the review node.
-    """
-
-    # Create a state with a review decision
-    state = {
-        "learner_need": "review"
-    }
-
-    # Route the action
-    result = route_action(state)
-
-    # Verify the correct destination
-    assert result == "review"
-
-
-def test_route_action_recommend():
-    """
-    Test that recommendation requests are routed
-    to the recommendation node.
-    """
-
-    # Create a state with a recommend decision
-    state = {
-        "learner_need": "recommend"
-    }
-
-    # Route the action
-    result = route_action(state)
-
-    # Verify the correct destination
-    assert result == "recommend"
-
-
-def test_route_action_default():
-    """
-    Test that an unknown learner need falls back
-    to the recommendation node.
-    """
-
-    # Create a state with an unexpected value
-    state = {
-        "learner_need": "unknown"
-    }
-
-    # Route the action
-    result = route_action(state)
-
-    # Verify the safe default destination
-    assert result == "recommend"
 
 
 def test_plan_next_topic():
@@ -4217,13 +4108,12 @@ def test_select_practice_type_python_low_mastery():
         preferred_format=None,
     )
 
-    assert result == "true_false"
-
+    assert result == "flashcards"
 
 def test_select_practice_type_python_medium_mastery():
     """
     Medium-mastery Python learners should receive
-    guided code-completion practice.
+    short-answer practice.
     """
 
     result = select_practice_type(
@@ -4232,13 +4122,13 @@ def test_select_practice_type_python_medium_mastery():
         preferred_format=None,
     )
 
-    assert result == "code_completion"
+    assert result == "short_answer"
 
 
 def test_select_practice_type_python_high_mastery():
     """
     High-mastery Python learners should receive
-    more advanced debugging practice.
+    application-oriented coding practice.
     """
 
     result = select_practice_type(
@@ -4247,7 +4137,7 @@ def test_select_practice_type_python_high_mastery():
         preferred_format=None,
     )
 
-    assert result == "debugging"
+    assert result == "coding"
 
 
 def test_select_practice_type_agentic_medium_mastery():
@@ -4283,7 +4173,7 @@ def test_select_practice_type_agentic_high_mastery():
 def test_select_practice_type_guided_python_preference():
     """
     Guided-practice preference should favor
-    code completion for programming topics.
+    coding practice for programming topics.
     """
 
     result = select_practice_type(
@@ -4292,7 +4182,7 @@ def test_select_practice_type_guided_python_preference():
         preferred_format="guided_practice",
     )
 
-    assert result == "code_completion"
+    assert result == "coding"
 
 
 def test_select_practice_type_practical_agentic_preference():

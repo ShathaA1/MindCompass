@@ -1479,26 +1479,19 @@ def select_practice_type(
     preferred_format: str | None,
 ) -> str:
     """
-    Select a personalized practice type using
+    Select a simplified practice type using
     the topic domain, learner mastery, and
     preferred learning format.
     """
 
     topic_name_lower = topic_name.lower()
 
-    # Detect the topic domain.
-    is_python_topic = (
+    # Detect whether the topic is technical
+    # and suitable for coding practice.
+    is_python_or_ml = (
         "python" in topic_name_lower
-    )
-
-    is_ml_topic = (
-        "machine learning" in topic_name_lower
+        or "machine learning" in topic_name_lower
         or "ml" in topic_name_lower
-    )
-
-    is_agentic_topic = (
-        "agent" in topic_name_lower
-        or "agentic" in topic_name_lower
     )
 
     # Respect the learner's preferred format first.
@@ -1508,60 +1501,31 @@ def select_practice_type(
     if preferred_format == "detailed_explanations":
         return "short_answer"
 
-    if preferred_format == "guided_practice":
-        if is_python_topic or is_ml_topic:
-            return "code_completion"
+    if preferred_format in [
+        "guided_practice",
+        "practical_examples",
+    ]:
+        if is_python_or_ml:
+            return "coding"
 
         return "scenario"
 
-    if preferred_format == "practical_examples":
-        if is_python_topic or is_ml_topic:
-            if (
-                mastery_score is not None
-                and mastery_score >= 70
-            ):
-                return "debugging"
-
-            return "coding"
-
-        if is_agentic_topic:
-            return "scenario"
-
-    # Fall back to mastery-based selection.
+    # Fall back to mastery-based practice selection.
     if mastery_score is None:
         return "flashcards"
 
     if mastery_score < 40:
-        return "true_false"
-
-    if mastery_score < 55:
-        return "fill_blank"
+        return "flashcards"
 
     if mastery_score < 70:
-        if is_python_topic or is_ml_topic:
-            return "code_completion"
-
-        return "short_answer"
-
-    if mastery_score < 85:
-        if is_python_topic or is_ml_topic:
-            return "coding"
-
-        if is_agentic_topic:
-            return "scenario"
-
         return "short_answer"
 
     # Higher-mastery learners receive
-    # more application-oriented practice.
-    if is_python_topic or is_ml_topic:
-        return "debugging"
+    # application-oriented practice.
+    if is_python_or_ml:
+        return "coding"
 
-    if is_agentic_topic:
-        return "scenario"
-
-    return "short_answer"
-
+    return "scenario"
 
 
 def practice_node(
