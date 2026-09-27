@@ -25,6 +25,7 @@ from app.agent.graph import (
     submit_initial_diagnostic_node,
     route_initial_setup,
     route_tutor_entry,
+    select_practice_type,
 )
 from app.agent.planning import (
     determine_learner_need,
@@ -2899,7 +2900,8 @@ def test_teach_node_uses_personalization_data(
 def test_prepare_practice_inputs():
     """
     Practice inputs should include the current topic,
-    learner level, weak areas, and user request.
+    learner level, mastery, weak areas, preferences,
+    and user request.
     """
 
     state = {
@@ -2925,18 +2927,42 @@ def test_prepare_practice_inputs():
 
     result = prepare_practice_inputs(state)
 
-    assert result == {
-        "topic_id": 12,
-        "topic_name": "Building Your First Agent",
-        "student_level": "intermediate",
-        "weak_areas": [
-            "Tool selection",
-            "Tool arguments",
-        ],
-        "user_message": (
-            "Give me practice questions about tool selection."
-        ),
-    }
+    assert result["topic_id"] == 12
+
+    assert (
+        result["topic_name"]
+        == "Building Your First Agent"
+    )
+
+    assert (
+        result["student_level"]
+        == "intermediate"
+    )
+
+    assert (
+        result["mastery_score"]
+        == 55
+    )
+
+    assert result["weak_areas"] == [
+        "Tool selection",
+        "Tool arguments",
+    ]
+
+    assert (
+        result["preferred_format"]
+        is None
+    )
+
+    assert (
+        result["preferred_pace"]
+        is None
+    )
+
+    assert (
+        result["user_message"]
+        == "Give me practice questions about tool selection."
+    )
 
 def test_prepare_practice_inputs_without_topic():
     """
@@ -3002,14 +3028,34 @@ def test_practice_node_generates_personalized_practice(
     # does not call the real language model.
     class FakePracticeTool:
         def invoke(self, inputs):
+            # Verify that the practice request contains
+            # the current topic.
             assert (
-                inputs["topic"]
-                == "Building Your First Agent"
+                'Practice the topic '
+                '"Building Your First Agent".'
+                in inputs["topic"]
             )
+
+            # Verify that the learner's mastery score
+            # is included in the personalized request.
+            assert (
+                "55%"
+                in inputs["topic"]
+            )
+
+            # Verify that the learner's current request
+            # is included in the personalized request.
+            assert (
+                "Give me practice questions "
+                "about tool selection."
+                in inputs["topic"]
+            )
+
             assert (
                 inputs["student_level"]
                 == "intermediate"
             )
+
             assert (
                 "AI agents can use tools"
                 in inputs["context"]
@@ -3024,10 +3070,13 @@ def test_practice_node_generates_personalized_practice(
                 "Tool arguments",
             ]
 
+            # A learner with 55% mastery in an Agentic AI
+            # topic should receive short-answer practice.
             assert (
                 inputs["practice_type"]
-                == "flashcards"
+                == "short_answer"
             )
+
             assert inputs["num_items"] == 5
 
             return (
@@ -4221,3 +4270,216 @@ def test_prepare_teaching_inputs_with_personalization():
         result["user_message"]
         == "Explain Python variables."
     )
+
+
+def test_practice_node_uses_learner_preferences(
+    monkeypatch
+):
+    """
+    The practice node should include learner
+    preferences in the personalized practice request.
+    """
+
+    # Mock RAG retrieval so the test does not
+    # call the real vector database.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name, retrieval_query=None: (
+            "Python variables store and update values."
+        )
+    )
+
+    captured_inputs = {}
+
+    class FakePracticeTool:
+        def invoke(self, inputs):
+            # Capture the inputs sent to the practice tool.
+            captured_inputs.update(inputs)
+
+            return (
+                "Personalized practice generated."
+            )
+
+    monkeypatch.setattr(
+        "app.agent.graph.generate_practice",
+        FakePracticeTool()
+    )
+
+    state = {
+        "current_topic": {
+            "topic_id": 27,
+            "name": "Python Reference Material",
+        },
+        "learner_context": {
+            "current_level": "beginner",
+            "preferred_format": "practical_examples",
+            "preferred_pace": "slow",
+        },
+        "topic_mastery": {
+            "mastery_score": 55,
+            "weak_areas": [
+                "Variable reassignment",
+            ],
+        },
+        "user_message": (
+            "Give me practice about variables."
+        ),
+    }
+
+    result = practice_node(state)
+
+    personalized_topic = captured_inputs[
+        "topic"
+    ]
+
+    assert (
+        "55%"
+        in personalized_topic
+    )
+
+    assert (
+        "practical_examples"
+        in personalized_topic
+    )
+
+    assert (
+        "slow"
+        in personalized_topic
+    )
+
+    assert (
+        "Give me practice about variables."
+        in personalized_topic
+    )
+
+    assert json.loads(
+        captured_inputs["weak_areas"]
+    ) == [
+        "Variable reassignment",
+    ]
+
+    assert (
+        result["response"]
+        == "Personalized practice generated."
+    )
+
+
+
+def test_select_practice_type_python_low_mastery():
+    """
+    Low-mastery Python learners should receive
+    simple concept-reinforcement practice.
+    """
+
+    result = select_practice_type(
+        topic_name="Python Foundations",
+        mastery_score=30,
+        preferred_format=None,
+    )
+
+    assert result == "true_false"
+
+
+def test_select_practice_type_python_medium_mastery():
+    """
+    Medium-mastery Python learners should receive
+    guided code-completion practice.
+    """
+
+    result = select_practice_type(
+        topic_name="Python Functions",
+        mastery_score=60,
+        preferred_format=None,
+    )
+
+    assert result == "code_completion"
+
+
+def test_select_practice_type_python_high_mastery():
+    """
+    High-mastery Python learners should receive
+    more advanced debugging practice.
+    """
+
+    result = select_practice_type(
+        topic_name="Python Functions",
+        mastery_score=90,
+        preferred_format=None,
+    )
+
+    assert result == "debugging"
+
+
+def test_select_practice_type_agentic_medium_mastery():
+    """
+    Medium-mastery Agentic AI learners should receive
+    conceptual short-answer practice.
+    """
+
+    result = select_practice_type(
+        topic_name="Building Your First Agent",
+        mastery_score=60,
+        preferred_format=None,
+    )
+
+    assert result == "short_answer"
+
+
+def test_select_practice_type_agentic_high_mastery():
+    """
+    Higher-mastery Agentic AI learners should receive
+    applied scenario-based practice.
+    """
+
+    result = select_practice_type(
+        topic_name="Agent Tool Use",
+        mastery_score=80,
+        preferred_format=None,
+    )
+
+    assert result == "scenario"
+
+
+def test_select_practice_type_guided_python_preference():
+    """
+    Guided-practice preference should favor
+    code completion for programming topics.
+    """
+
+    result = select_practice_type(
+        topic_name="Python Variables",
+        mastery_score=75,
+        preferred_format="guided_practice",
+    )
+
+    assert result == "code_completion"
+
+
+def test_select_practice_type_practical_agentic_preference():
+    """
+    Practical-example preference should favor
+    scenarios for Agentic AI topics.
+    """
+
+    result = select_practice_type(
+        topic_name="Agent Planning",
+        mastery_score=55,
+        preferred_format="practical_examples",
+    )
+
+    assert result == "scenario"
+
+
+def test_select_practice_type_without_mastery():
+    """
+    Learners without mastery data should receive
+    a safe default practice type.
+    """
+
+    result = select_practice_type(
+        topic_name="Introduction to LLMs",
+        mastery_score=None,
+        preferred_format=None,
+    )
+
+    assert result == "flashcards"

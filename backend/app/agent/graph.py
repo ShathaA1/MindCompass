@@ -1676,19 +1676,25 @@ def prepare_practice_inputs(
     state: TutorState
 ) -> dict:
     """
-    Prepare the learner, topic, mastery information,
-    and user request required for personalized practice.
+    Prepare learner, topic, mastery, preferences,
+    and user request information required for
+    personalized practice.
     """
 
-    # Load the learner's current topic and context.
+    # Load the learner's current topic.
     current_topic = state.get(
         "current_topic",
         {}
     )
+
+    # Load learner profile information.
     learner_context = state.get(
         "learner_context",
         {}
     )
+
+    # Load mastery information for the
+    # learner's current topic.
     topic_mastery = state.get(
         "topic_mastery",
         {}
@@ -1705,8 +1711,13 @@ def prepare_practice_inputs(
     if not current_topic:
         return {}
 
-    topic_id = current_topic.get("topic_id")
-    topic_name = current_topic.get("name")
+    topic_id = current_topic.get(
+        "topic_id"
+    )
+
+    topic_name = current_topic.get(
+        "name"
+    )
 
     # Stop safely if the topic information
     # is incomplete.
@@ -1721,20 +1732,125 @@ def prepare_practice_inputs(
         or "beginner"
     )
 
-    # Use detected weak areas to personalize
-    # the generated practice activities.
+    # Load learner mastery information.
+    mastery_score = topic_mastery.get(
+        "mastery_score"
+    )
+
     weak_areas = topic_mastery.get(
         "weak_areas",
         []
+    )
+
+    # Load learner preferences from the profile.
+    preferred_format = learner_context.get(
+        "preferred_format"
+    )
+
+    preferred_pace = learner_context.get(
+        "preferred_pace"
     )
 
     return {
         "topic_id": topic_id,
         "topic_name": topic_name,
         "student_level": student_level,
+        "mastery_score": mastery_score,
         "weak_areas": weak_areas,
+        "preferred_format": preferred_format,
+        "preferred_pace": preferred_pace,
         "user_message": user_message,
     }
+
+def select_practice_type(
+    topic_name: str,
+    mastery_score: float | None,
+    preferred_format: str | None,
+) -> str:
+    """
+    Select a personalized practice type using
+    the topic domain, learner mastery, and
+    preferred learning format.
+    """
+
+    topic_name_lower = topic_name.lower()
+
+    # Detect the topic domain.
+    is_python_topic = (
+        "python" in topic_name_lower
+    )
+
+    is_ml_topic = (
+        "machine learning" in topic_name_lower
+        or "ml" in topic_name_lower
+    )
+
+    is_agentic_topic = (
+        "agent" in topic_name_lower
+        or "agentic" in topic_name_lower
+    )
+
+    # Respect the learner's preferred format first.
+    if preferred_format == "concise_explanations":
+        return "flashcards"
+
+    if preferred_format == "detailed_explanations":
+        return "short_answer"
+
+    if preferred_format == "guided_practice":
+        if is_python_topic or is_ml_topic:
+            return "code_completion"
+
+        return "scenario"
+
+    if preferred_format == "practical_examples":
+        if is_python_topic or is_ml_topic:
+            if (
+                mastery_score is not None
+                and mastery_score >= 70
+            ):
+                return "debugging"
+
+            return "coding"
+
+        if is_agentic_topic:
+            return "scenario"
+
+    # Fall back to mastery-based selection.
+    if mastery_score is None:
+        return "flashcards"
+
+    if mastery_score < 40:
+        return "true_false"
+
+    if mastery_score < 55:
+        return "fill_blank"
+
+    if mastery_score < 70:
+        if is_python_topic or is_ml_topic:
+            return "code_completion"
+
+        return "short_answer"
+
+    if mastery_score < 85:
+        if is_python_topic or is_ml_topic:
+            return "coding"
+
+        if is_agentic_topic:
+            return "scenario"
+
+        return "short_answer"
+
+    # Higher-mastery learners receive
+    # more application-oriented practice.
+    if is_python_topic or is_ml_topic:
+        return "debugging"
+
+    if is_agentic_topic:
+        return "scenario"
+
+    return "short_answer"
+
 
 
 def practice_node(
@@ -1775,13 +1891,80 @@ def practice_node(
             )
         }
 
+    # Build personalization instructions using
+    # the learner's mastery and profile preferences.
+    personalization_parts = [
+        f'Practice the topic "{practice_inputs["topic_name"]}".'
+    ]
+
+    mastery_score = practice_inputs.get(
+        "mastery_score"
+    )
+
+    if mastery_score is not None:
+        personalization_parts.append(
+            f"The learner's current mastery score is "
+            f"{mastery_score:.0f}%."
+        )
+
+    preferred_format = practice_inputs.get(
+        "preferred_format"
+    )
+
+    if preferred_format:
+        personalization_parts.append(
+            "Preferred learning format: "
+            f"{preferred_format}."
+        )
+
+    preferred_pace = practice_inputs.get(
+        "preferred_pace"
+    )
+
+    if preferred_pace:
+        personalization_parts.append(
+            "Preferred learning pace: "
+            f"{preferred_pace}."
+        )
+
+    user_message = practice_inputs.get(
+        "user_message"
+    )
+
+    if user_message:
+        personalization_parts.append(
+            "The learner specifically requested: "
+            f"{user_message}"
+        )
+
+    personalized_topic = " ".join(
+        personalization_parts
+    )
+
+
+    # Select a personalized practice type using
+    # the learner's topic, mastery, and preferences.
+    practice_type = select_practice_type(
+        topic_name=practice_inputs[
+            "topic_name"
+        ],
+        mastery_score=practice_inputs.get(
+            "mastery_score"
+        ),
+        preferred_format=practice_inputs.get(
+            "preferred_format"
+        ),
+    )
     # Generate personalized practice using the retrieved
-    # topic context, learner level, and detected weak areas.
+    # course material, learner mastery, weak areas,
+    # level, and profile preferences.
     practice = generate_practice.invoke({
-        "topic": practice_inputs["topic_name"],
+        "topic": personalized_topic,
         "context": context,
-        "student_level": practice_inputs["student_level"],
-        "practice_type": "flashcards",
+        "student_level": practice_inputs[
+            "student_level"
+        ],
+        "practice_type": practice_type,
         "num_items": 5,
         "weak_areas": json.dumps(
             practice_inputs["weak_areas"]
