@@ -27,7 +27,17 @@ Usage:
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
+
+# Ensure `backend/` is on sys.path so backend/app/database/models.py's
+# `from app.database.connection import Base` (a short-form import assuming
+# backend/ as root) resolves correctly when this script is run from the
+# project root as `python -m scripts.seed_topics`. This is a local,
+# non-invasive workaround -- it does not modify any shared file.
+_BACKEND_DIR = str(Path(__file__).resolve().parent.parent / "backend")
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
 
 from sqlalchemy.orm import Session
 
@@ -156,9 +166,37 @@ def discover_lessons(source_root: Path) -> list[dict]:
 
         for chapter_dir in chapter_dirs:
             chapter_number = _chapter_number_from_folder(chapter_dir.name)
-            for lesson_dir in sorted(
-                p for p in chapter_dir.iterdir() if p.is_dir()
-            ):
+            lesson_dirs = sorted(p for p in chapter_dir.iterdir() if p.is_dir())
+
+            if not lesson_dirs:
+                # Chapter has files directly inside it (no Lesson
+                # subfolders) -- e.g. a reference book split into one
+                # PDF per chapter. Treat the whole chapter as ONE lesson.
+                chapter_title = re.sub(
+                    r"^\d{2}_(Chapter_\d+_)?", "", chapter_dir.name
+                )
+                chapter_title = re.sub(r"[_]+", " ", chapter_title).strip()
+                lessons.append(
+                    {
+                        "course_name": course_name,
+                        "chapter_number": chapter_number,
+                        "lesson_dir": chapter_dir,
+                        "name": (
+                            f"{course_name} | Ch{chapter_number}.1 "
+                            f"\u2013 {chapter_title}"
+                        ),
+                        "description": (
+                            f"Course: {course_name} | Chapter "
+                            f"{chapter_number} lesson: {chapter_title}"
+                        ),
+                        "learning_objectives": _extract_learning_objectives(
+                            chapter_dir
+                        ),
+                    }
+                )
+                continue
+
+            for lesson_dir in lesson_dirs:
                 lesson_name = _lesson_name_from_folder(lesson_dir.name)
                 lesson_number = int(lesson_dir.name.split("_")[1])
                 lessons.append(
@@ -200,10 +238,7 @@ def seed_topics(session: Session, source_root: Path) -> list[Topic]:
 
     all_topics: list[Topic] = []
     folder_map_entries: list[dict] = []
-    # Track the previous topic within each course.
-    # This allows prerequisite chains to continue across chapter boundaries
-    # without linking topics from different courses.
-    previous_topic_by_course: dict[str, Topic] = {}
+    previous_topic_by_course_chapter: dict[tuple[str, int], Topic] = {}
 
     for lesson in lessons:
         topic = existing_topics_by_name.get(lesson["name"])
@@ -222,11 +257,8 @@ def seed_topics(session: Session, source_root: Path) -> list[Topic]:
             topic.description = lesson["description"]
             topic.learning_objectives = lesson["learning_objectives"]
 
-        # Use the course name as the key so the prerequisite chain
-        # continues across chapter boundaries within the same course.
-        course_name = lesson["course_name"]
-        previous_topic = previous_topic_by_course.get(course_name)
-
+        key = (lesson["course_name"], lesson["chapter_number"])
+        previous_topic = previous_topic_by_course_chapter.get(key)
         if previous_topic is not None:
             already_linked = (
                 session.query(TopicPrerequisite)
@@ -236,7 +268,6 @@ def seed_topics(session: Session, source_root: Path) -> list[Topic]:
                 )
                 .first()
             )
-
             if already_linked is None:
                 session.add(
                     TopicPrerequisite(
@@ -244,9 +275,7 @@ def seed_topics(session: Session, source_root: Path) -> list[Topic]:
                         prerequisite_topic_id=previous_topic.topic_id,
                     )
                 )
-
-        # Save the current topic as the previous topic for this course.
-        previous_topic_by_course[course_name] = topic
+        previous_topic_by_course_chapter[key] = topic
 
         all_topics.append(topic)
         folder_map_entries.append(
