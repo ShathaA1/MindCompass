@@ -4618,3 +4618,150 @@ def test_review_node_uses_personalization_data(
         result["response"]
         == "Personalized review generated."
     )
+
+
+def test_generate_assessment_node_uses_personalization(
+    monkeypatch
+):
+    """
+    The assessment node should include learner mastery,
+    weak areas, preferences, and request in the
+    personalized assessment topic.
+    """
+
+    # Mock RAG retrieval so the test does not
+    # call the real vector database.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name, retrieval_query=None: (
+            "Python variables store values and can "
+            "be reassigned during program execution."
+        )
+    )
+
+    captured_inputs = {}
+
+    class FakeQuizTool:
+        def invoke(self, inputs):
+            # Capture inputs sent to the quiz tool.
+            captured_inputs.update(inputs)
+
+            fake_quiz = {
+                "questions": [
+                    {
+                        "topic_id": 27,
+                        "question_text": (
+                            "What happens when a variable "
+                            "is reassigned?"
+                        ),
+                        "question_type": "multiple_choice",
+                        "difficulty": "beginner",
+                        "options": [
+                            "A",
+                            "B",
+                            "C",
+                            "D",
+                        ],
+                        "correct_answer": "A",
+                    }
+                ]
+            }
+
+            return json.dumps(
+                fake_quiz
+            )
+
+    monkeypatch.setattr(
+        "app.agent.graph.generate_quiz",
+        FakeQuizTool()
+    )
+
+    state = {
+        "user_id": 2,
+        "current_topic": {
+            "topic_id": 27,
+            "name": "Python Reference Material",
+        },
+        "learner_context": {
+            "current_level": "beginner",
+            "preferred_format": "practical_examples",
+            "preferred_pace": "slow",
+        },
+        "topic_mastery": {
+            "mastery_score": 75,
+            "weak_areas": [
+                {
+                    "area": "Variable reassignment",
+                    "reason": "Incorrect understanding.",
+                },
+                {
+                    "area": "Multiple assignment order",
+                    "reason": "Values were reversed.",
+                },
+            ],
+        },
+        "assessment_type": "topic",
+        "user_message": (
+            "Assess my understanding of variables."
+        ),
+    }
+
+    result = generate_assessment_node(
+        state
+    )
+
+    personalized_topic = (
+        captured_inputs["topics"][0]["topic"]
+    )
+
+    assert (
+        'Assess the topic "Python Reference Material".'
+        in personalized_topic
+    )
+
+    assert (
+        "75%"
+        in personalized_topic
+    )
+
+    assert (
+        "Variable reassignment"
+        in personalized_topic
+    )
+
+    assert (
+        "Multiple assignment order"
+        in personalized_topic
+    )
+
+    assert (
+        "practical_examples"
+        in personalized_topic
+    )
+
+    assert (
+        "slow"
+        in personalized_topic
+    )
+
+    assert (
+        "Assess my understanding of variables."
+        in personalized_topic
+    )
+
+    assert (
+        captured_inputs["student_level"]
+        == "beginner"
+    )
+
+    assert (
+        captured_inputs["assessment_type"]
+        == "topic"
+    )
+
+    assert (
+        result["assessment_questions"][0][
+            "topic_id"
+        ]
+        == 27
+    )

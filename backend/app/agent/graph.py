@@ -838,56 +838,81 @@ def prepare_assessment_inputs(
     state: TutorState
 ) -> dict:
     """
-    Prepare the learner, topic, and request information
-    required for generating an assessment.
+    Prepare learner, topic, mastery, preferences,
+    and request information required for generating
+    a personalized assessment.
     """
 
-    # Get the current topic selected by
-    # the Tutor Agent workflow.
+    # Load the learner's current topic.
     current_topic = state.get(
         "current_topic",
         {}
     )
 
-    # Get the learner profile information
-    # already loaded into TutorState.
+    # Load learner profile information.
     learner_context = state.get(
         "learner_context",
         {}
     )
 
-    # Get the learner's current request so RAG
+    # Load mastery information for the
+    # learner's current topic.
+    topic_mastery = state.get(
+        "topic_mastery",
+        {}
+    )
+
+    # Load the learner's current request so RAG
     # can retrieve assessment-relevant material.
     user_message = state.get(
         "user_message",
         ""
     )
 
-    # Stop safely if no current topic
-    # is available for assessment.
+    # Assessment generation requires
+    # an active topic.
     if not current_topic:
         return {}
 
-    # Read the topic information required
-    # by the quiz generation tool.
-    topic_id = current_topic.get("topic_id")
-    topic_name = current_topic.get("name")
+    topic_id = current_topic.get(
+        "topic_id"
+    )
 
-    # Stop safely if the topic information
+    topic_name = current_topic.get(
+        "name"
+    )
+
+    # Stop safely if topic information
     # is incomplete.
     if not topic_id or not topic_name:
         return {}
 
-    # Prefer the learner's current level because it
-    # reflects their latest known learning progress.
+    # Prefer the learner's latest assessed level.
     student_level = (
         learner_context.get("current_level")
         or learner_context.get("initial_level")
         or "beginner"
     )
 
-    # Prepare the topic structure expected
-    # by the quiz generation tool.
+    # Load current mastery information.
+    mastery_score = topic_mastery.get(
+        "mastery_score"
+    )
+
+    weak_areas = topic_mastery.get(
+        "weak_areas",
+        []
+    )
+
+    # Load learner preferences.
+    preferred_format = learner_context.get(
+        "preferred_format"
+    )
+
+    preferred_pace = learner_context.get(
+        "preferred_pace"
+    )
+
     topics = [
         {
             "topic_id": topic_id,
@@ -902,6 +927,10 @@ def prepare_assessment_inputs(
             state.get("assessment_type")
             or "topic"
         ),
+        "mastery_score": mastery_score,
+        "weak_areas": weak_areas,
+        "preferred_format": preferred_format,
+        "preferred_pace": preferred_pace,
         "user_message": user_message,
     }
 
@@ -1316,7 +1345,9 @@ def generate_assessment_node(
     context = retrieve_topic_context(
         topic_id=topic_id,
         topic_name=topic_name,
-        retrieval_query=assessment_inputs["user_message"]
+        retrieval_query=assessment_inputs[
+            "user_message"
+        ]
     )
 
     # Do not generate questions without grounded
@@ -1330,11 +1361,97 @@ def generate_assessment_node(
             )
         }
 
+
+    # Build personalized assessment instructions
+    # using learner mastery, weak areas, and preferences.
+    assessment_topic_parts = [
+        f'Assess the topic "{topic_name}".'
+    ]
+
+    mastery_score = assessment_inputs.get(
+        "mastery_score"
+    )
+
+    if mastery_score is not None:
+        assessment_topic_parts.append(
+            f"The learner's current mastery score is "
+            f"{mastery_score:.0f}%."
+        )
+
+    weak_areas = assessment_inputs.get(
+        "weak_areas",
+        []
+    )
+
+    weak_area_names = []
+
+    for weak_area in weak_areas:
+        if isinstance(weak_area, dict):
+            area_name = weak_area.get(
+                "area"
+            )
+
+            if area_name:
+                weak_area_names.append(
+                    area_name
+                )
+        else:
+            weak_area_names.append(
+                str(weak_area)
+            )
+
+    if weak_area_names:
+        assessment_topic_parts.append(
+            "Include questions that check these weak areas: "
+            + ", ".join(weak_area_names)
+            + "."
+        )
+
+    preferred_format = assessment_inputs.get(
+        "preferred_format"
+    )
+
+    if preferred_format:
+        assessment_topic_parts.append(
+            "Preferred learning format: "
+            f"{preferred_format}."
+        )
+
+    preferred_pace = assessment_inputs.get(
+        "preferred_pace"
+    )
+
+    if preferred_pace:
+        assessment_topic_parts.append(
+            "Preferred learning pace: "
+            f"{preferred_pace}."
+        )
+
+    user_message = assessment_inputs.get(
+        "user_message"
+    )
+
+    if user_message:
+        assessment_topic_parts.append(
+            "The learner specifically requested: "
+            f"{user_message}"
+        )
+
+    personalized_assessment_topic = " ".join(
+        assessment_topic_parts
+    )
+
+    personalized_topics = [
+        {
+            "topic_id": topic_id,
+            "topic": personalized_assessment_topic,
+        }
+    ]
     # Generate the quiz using the retrieved course
     # material and learner information.
     quiz_result = generate_quiz.invoke(
         {
-            "topics": assessment_inputs["topics"],
+            "topics": personalized_topics,
             "context": context,
             "student_level": assessment_inputs[
                 "student_level"
