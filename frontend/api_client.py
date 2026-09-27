@@ -220,3 +220,30 @@ def send_chat_message(
         },
         timeout=REQUEST_TIMEOUT,
     )
+
+def submit_chat_assessment(
+    token,
+    session_id,
+    assessment_type,
+    assessment_questions,
+    assessment_answers,
+):
+    """
+    Submit Tutor assessment answers and return
+    the updated mastery and recommendation.
+    """
+
+    return requests.post(
+        f"{BASE_URL}/chat/{session_id}/assessment",
+        headers=_headers(token),
+        json={
+            "assessment_type": assessment_type,
+            "assessment_questions": (
+                assessment_questions
+            ),
+            "assessment_answers": (
+                assessment_answers
+            ),
+        },
+        timeout=REQUEST_TIMEOUT,
+    )

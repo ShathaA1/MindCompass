@@ -1,5 +1,7 @@
 """Defines request and response schemas for Tutor chat interactions."""
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -19,3 +21,24 @@ class ChatMessageRequest(BaseModel):
     message: str = Field(
         min_length=1,
     )
+
+
+class AssessmentAnswer(BaseModel):
+    """A learner answer submitted for one assessment question."""
+
+    learner_answer: str = Field(
+        min_length=1,
+    )
+
+
+class AssessmentSubmissionRequest(BaseModel):
+    """
+    Request data for submitting answers to a
+    generated Tutor assessment.
+    """
+
+    assessment_type: str = "topic"
+
+    assessment_questions: list[dict[str, Any]]
+
+    assessment_answers: list[AssessmentAnswer]

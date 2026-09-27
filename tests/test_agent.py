@@ -24,6 +24,7 @@ from app.agent.graph import (
     generate_initial_diagnostic_node,
     submit_initial_diagnostic_node,
     route_initial_setup,
+    route_tutor_entry,
 )
 from app.agent.planning import (
     determine_learner_need,
@@ -1728,8 +1729,8 @@ def test_recommend_node_completes_path_when_no_topic_remains(
 
 def test_prepare_assessment_inputs():
     """
-    Assessment inputs should be prepared from
-    the current topic and learner context.
+    Assessment inputs should include the current topic,
+    learner level, assessment type, and user request.
     """
 
     state = {
@@ -1742,6 +1743,9 @@ def test_prepare_assessment_inputs():
             "current_level": "intermediate",
         },
         "assessment_type": "topic",
+        "user_message": (
+            "Test me on tool usage in AI agents."
+        ),
     }
 
     result = prepare_assessment_inputs(state)
@@ -1756,6 +1760,11 @@ def test_prepare_assessment_inputs():
     assert result["student_level"] == "intermediate"
     assert result["assessment_type"] == "topic"
 
+    assert (
+        result["user_message"]
+        == "Test me on tool usage in AI agents."
+    )
+
 
 def test_prepare_assessment_inputs_without_topic():
     """
@@ -1768,6 +1777,9 @@ def test_prepare_assessment_inputs_without_topic():
         "learner_context": {
             "current_level": "intermediate",
         },
+        "user_message": (
+            "Test me on tool usage in AI agents."
+        ),
     }
 
     result = prepare_assessment_inputs(state)
@@ -1775,21 +1787,38 @@ def test_prepare_assessment_inputs_without_topic():
     assert result == {}
 
 
-def test_generate_assessment_node_generates_quiz(monkeypatch):
+def test_generate_assessment_node_generates_quiz(
+    monkeypatch
+):
     """
-    The assessment node should retrieve learning context,
-    generate a quiz, and store the generated questions
-    in TutorState.
+    The assessment node should use the learner's
+    request for RAG retrieval, generate a quiz,
+    and store the generated questions in TutorState.
     """
 
-    # Mock the RAG retrieval step so the test
-    # does not require embeddings or an API call.
-    monkeypatch.setattr(
-        "app.agent.graph.retrieve_topic_context",
-        lambda topic_id, topic_name: (
+    retrieved_query = {}
+
+    # Mock RAG retrieval and capture its inputs
+    # so the semantic retrieval query can be verified.
+    def mock_retrieve_topic_context(
+        topic_id,
+        topic_name,
+        retrieval_query=None
+    ):
+        retrieved_query["topic_id"] = topic_id
+        retrieved_query["topic_name"] = topic_name
+        retrieved_query["retrieval_query"] = (
+            retrieval_query
+        )
+
+        return (
             "AI agents can reason, use tools, "
             "and perform actions to achieve goals."
         )
+
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        mock_retrieve_topic_context
     )
 
     # Create a fake quiz response matching the
@@ -1815,14 +1844,8 @@ def test_generate_assessment_node_generates_quiz(monkeypatch):
     # Mock the quiz tool so no LLM API
     # call is made during the test.
     class FakeQuizTool:
-        """
-        Fake quiz tool used to avoid calling
-        the real LLM during testing.
-        """
-
         def invoke(self, inputs):
             return json.dumps(fake_quiz)
-
 
     monkeypatch.setattr(
         "app.agent.graph.generate_quiz",
@@ -1839,16 +1862,37 @@ def test_generate_assessment_node_generates_quiz(monkeypatch):
             "current_level": "intermediate",
         },
         "assessment_type": "topic",
+        "user_message": (
+            "Test me on tool usage in AI agents."
+        ),
     }
 
     result = generate_assessment_node(state)
 
+    # Verify that retrieval remains restricted
+    # to the current topic.
+    assert retrieved_query["topic_id"] == 12
+
+    assert (
+        retrieved_query["topic_name"]
+        == "Building Your First Agent"
+    )
+
+    # Verify that the learner's actual request
+    # is used as the semantic retrieval query.
+    assert (
+        retrieved_query["retrieval_query"]
+        == "Test me on tool usage in AI agents."
+    )
+
     assert result["assessment_type"] == "topic"
     assert len(result["assessment_questions"]) == 1
+
     assert (
         result["assessment_questions"][0]["topic_id"]
         == 12
     )
+
     assert "questions" in result["response"]
 
 
@@ -1860,11 +1904,13 @@ def test_generate_assessment_node_stops_without_rag_context(
     no learning context is available from RAG.
     """
 
-    # Simulate a RAG retrieval result
-    # with no available learning material.
+    # Accept retrieval_query because the assessment
+    # node now passes the learner's request to RAG.
     monkeypatch.setattr(
         "app.agent.graph.retrieve_topic_context",
-        lambda topic_id, topic_name: ""
+        lambda topic_id,
+        topic_name,
+        retrieval_query=None: ""
     )
 
     state = {
@@ -1877,6 +1923,9 @@ def test_generate_assessment_node_stops_without_rag_context(
             "current_level": "intermediate",
         },
         "assessment_type": "topic",
+        "user_message": (
+            "Test me on tool usage in AI agents."
+        ),
     }
 
     result = generate_assessment_node(state)
@@ -2376,7 +2425,7 @@ def test_teach_node_stops_without_rag_context(
 def test_prepare_practice_inputs():
     """
     Practice inputs should include the current topic,
-    learner level, and detected weak areas.
+    learner level, weak areas, and user request.
     """
 
     state = {
@@ -2395,6 +2444,9 @@ def test_prepare_practice_inputs():
                 "Tool arguments",
             ],
         },
+        "user_message": (
+            "Give me practice questions about tool selection."
+        ),
     }
 
     result = prepare_practice_inputs(state)
@@ -2407,8 +2459,10 @@ def test_prepare_practice_inputs():
             "Tool selection",
             "Tool arguments",
         ],
+        "user_message": (
+            "Give me practice questions about tool selection."
+        ),
     }
-
 
 def test_prepare_practice_inputs_without_topic():
     """
@@ -2438,36 +2492,68 @@ def test_practice_node_generates_personalized_practice(
     monkeypatch
 ):
     """
-    The practice node should retrieve topic context
-    and generate personalized practice activities.
+    The practice node should use the learner's
+    specific request for RAG retrieval and generate
+    personalized practice activities.
     """
+
+    retrieved_query = {}
 
     # Mock RAG retrieval so the test does not
     # require embeddings or a real vector database.
-    monkeypatch.setattr(
-        "app.agent.graph.retrieve_topic_context",
-        lambda topic_id, topic_name: (
+    def mock_retrieve_topic_context(
+        topic_id,
+        topic_name,
+        retrieval_query=None
+    ):
+        # Capture retrieval inputs so the test can
+        # verify the current topic and user request.
+        retrieved_query["topic_id"] = topic_id
+        retrieved_query["topic_name"] = topic_name
+        retrieved_query["retrieval_query"] = (
+            retrieval_query
+        )
+
+        return (
             "AI agents can use tools to interact "
             "with external systems."
         )
+
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        mock_retrieve_topic_context
     )
 
     # Create a fake practice tool so the test
     # does not call the real language model.
     class FakePracticeTool:
         def invoke(self, inputs):
-            assert inputs["topic"] == "Building Your First Agent"
-            assert inputs["student_level"] == "intermediate"
-            assert "AI agents can use tools" in inputs["context"]
+            assert (
+                inputs["topic"]
+                == "Building Your First Agent"
+            )
+            assert (
+                inputs["student_level"]
+                == "intermediate"
+            )
+            assert (
+                "AI agents can use tools"
+                in inputs["context"]
+            )
 
             # Verify that weak areas are passed
             # to the practice tool as JSON.
-            assert json.loads(inputs["weak_areas"]) == [
+            assert json.loads(
+                inputs["weak_areas"]
+            ) == [
                 "Tool selection",
                 "Tool arguments",
             ]
 
-            assert inputs["practice_type"] == "flashcards"
+            assert (
+                inputs["practice_type"]
+                == "flashcards"
+            )
             assert inputs["num_items"] == 5
 
             return (
@@ -2497,10 +2583,30 @@ def test_practice_node_generates_personalized_practice(
                 "Tool arguments",
             ],
         },
+        "user_message": (
+            "Give me practice questions about tool selection."
+        ),
     }
 
     result = practice_node(state)
 
+    # Verify that retrieval remains restricted
+    # to the learner's current topic.
+    assert retrieved_query["topic_id"] == 12
+
+    assert (
+        retrieved_query["topic_name"]
+        == "Building Your First Agent"
+    )
+
+    # Verify that the learner's actual request
+    # is used as the semantic retrieval query.
+    assert (
+        retrieved_query["retrieval_query"]
+        == "Give me practice questions about tool selection."
+    )
+
+    # Verify the final practice response.
     assert result["response"] == (
         "Practice activity focused on "
         "tool selection and tool arguments."
@@ -2519,7 +2625,7 @@ def test_practice_node_stops_without_rag_context(
     # learning material in the knowledge base.
     monkeypatch.setattr(
         "app.agent.graph.retrieve_topic_context",
-        lambda topic_id, topic_name: ""
+        lambda topic_id, topic_name, retrieval_query=None: ""
     )
 
     state = {
@@ -2546,7 +2652,7 @@ def test_practice_node_stops_without_rag_context(
 def test_prepare_review_inputs():
     """
     Review inputs should include the current topic,
-    learner level, and detected weak areas.
+    learner level, weak areas, and user request.
     """
 
     state = {
@@ -2565,6 +2671,9 @@ def test_prepare_review_inputs():
                 "Tool arguments",
             ],
         },
+        "user_message": (
+            "Review tool selection with me."
+        ),
     }
 
     result = prepare_review_inputs(state)
@@ -2577,6 +2686,9 @@ def test_prepare_review_inputs():
             "Tool selection",
             "Tool arguments",
         ],
+        "user_message": (
+            "Review tool selection with me."
+        ),
     }
 
 
@@ -2597,6 +2709,9 @@ def test_prepare_review_inputs_without_topic():
                 "Tool selection",
             ],
         },
+        "user_message": (
+            "Review tool selection with me."
+        ),
     }
 
     result = prepare_review_inputs(state)
@@ -2608,18 +2723,34 @@ def test_review_node_generates_focused_review(
     monkeypatch
 ):
     """
-    The review node should retrieve topic context
-    and generate a review focused on weak areas.
+    The review node should use the learner's
+    specific request for RAG retrieval and generate
+    a review focused on weak areas.
     """
 
-    # Mock RAG retrieval so the test does not
-    # require embeddings or a real vector database.
-    monkeypatch.setattr(
-        "app.agent.graph.retrieve_topic_context",
-        lambda topic_id, topic_name: (
+    retrieved_query = {}
+
+    # Mock RAG retrieval and capture its inputs
+    # so the semantic query can be verified.
+    def mock_retrieve_topic_context(
+        topic_id,
+        topic_name,
+        retrieval_query=None
+    ):
+        retrieved_query["topic_id"] = topic_id
+        retrieved_query["topic_name"] = topic_name
+        retrieved_query["retrieval_query"] = (
+            retrieval_query
+        )
+
+        return (
             "AI agents can reason, use tools, "
             "and interact with external systems."
         )
+
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        mock_retrieve_topic_context
     )
 
     # Create a fake explanation tool so the test
@@ -2628,22 +2759,34 @@ def test_review_node_generates_focused_review(
         def invoke(self, inputs):
             # Verify that the review request contains
             # the topic and the learner's weak areas.
-            assert "Building Your First Agent" in inputs["topic"]
-            assert "Tool selection" in inputs["topic"]
-            assert "Tool arguments" in inputs["topic"]
+            assert (
+                "Building Your First Agent"
+                in inputs["topic"]
+            )
+            assert (
+                "Tool selection"
+                in inputs["topic"]
+            )
+            assert (
+                "Tool arguments"
+                in inputs["topic"]
+            )
 
-            # Verify that the learner level and RAG
-            # context are passed correctly.
-            assert inputs["student_level"] == "intermediate"
-            assert "AI agents can reason" in inputs["context"]
+            # Verify learner level and RAG context.
+            assert (
+                inputs["student_level"]
+                == "intermediate"
+            )
+            assert (
+                "AI agents can reason"
+                in inputs["context"]
+            )
 
             return (
                 "Focused review of tool selection "
                 "and tool arguments."
             )
 
-    # Replace the real explanation tool
-    # with the fake tool during this test.
     monkeypatch.setattr(
         "app.agent.graph.explain",
         FakeExplainTool()
@@ -2664,9 +2807,28 @@ def test_review_node_generates_focused_review(
                 "Tool arguments",
             ],
         },
+        "user_message": (
+            "Review tool selection with me."
+        ),
     }
 
     result = review_node(state)
+
+    # Verify retrieval remains restricted
+    # to the learner's current topic.
+    assert retrieved_query["topic_id"] == 12
+
+    assert (
+        retrieved_query["topic_name"]
+        == "Building Your First Agent"
+    )
+
+    # Verify the learner's actual request is
+    # used as the semantic retrieval query.
+    assert (
+        retrieved_query["retrieval_query"]
+        == "Review tool selection with me."
+    )
 
     assert result["response"] == (
         "Focused review of tool selection "
@@ -2682,11 +2844,13 @@ def test_review_node_stops_without_rag_context(
     no learning context is available from RAG.
     """
 
-    # Simulate a topic with no available
-    # learning material in the knowledge base.
+    # Accept retrieval_query because review_node
+    # now passes the learner's request to RAG.
     monkeypatch.setattr(
         "app.agent.graph.retrieve_topic_context",
-        lambda topic_id, topic_name: ""
+        lambda topic_id,
+        topic_name,
+        retrieval_query=None: ""
     )
 
     state = {
@@ -2703,6 +2867,9 @@ def test_review_node_stops_without_rag_context(
                 "Tool selection",
             ],
         },
+        "user_message": (
+            "Review tool selection with me."
+        ),
     }
 
     result = review_node(state)
@@ -2715,39 +2882,64 @@ def test_review_node_generates_general_review_without_weak_areas(
 ):
     """
     The review node should generate a general topic review
-    when no weak areas are available.
+    when no weak areas are available while still using
+    the learner's request for RAG retrieval.
     """
 
-    # Mock RAG retrieval so the test does not
-    # require embeddings or a real vector database.
-    monkeypatch.setattr(
-        "app.agent.graph.retrieve_topic_context",
-        lambda topic_id, topic_name: (
+    retrieved_query = {}
+
+    def mock_retrieve_topic_context(
+        topic_id,
+        topic_name,
+        retrieval_query=None
+    ):
+        retrieved_query["retrieval_query"] = (
+            retrieval_query
+        )
+
+        return (
             "AI agents can reason, use tools, "
             "and interact with external systems."
         )
+
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        mock_retrieve_topic_context
     )
 
     # Create a fake explanation tool so the test
     # does not call the real language model.
     class FakeExplainTool:
         def invoke(self, inputs):
-            # Verify that the request asks for a general
-            # review rather than a weak-area-focused review.
-            assert "Building Your First Agent" in inputs["topic"]
-            assert "summarize its key concepts" in inputs["topic"]
-            assert "weak areas" not in inputs["topic"]
+            # With no weak areas, the generated review
+            # should summarize the topic generally.
+            assert (
+                "Building Your First Agent"
+                in inputs["topic"]
+            )
+            assert (
+                "summarize its key concepts"
+                in inputs["topic"]
+            )
+            assert (
+                "weak areas"
+                not in inputs["topic"]
+            )
 
-            assert inputs["student_level"] == "intermediate"
-            assert "AI agents can reason" in inputs["context"]
+            assert (
+                inputs["student_level"]
+                == "intermediate"
+            )
+            assert (
+                "AI agents can reason"
+                in inputs["context"]
+            )
 
             return (
                 "General review of the key concepts "
                 "for building an AI agent."
             )
 
-    # Replace the real explanation tool
-    # with the fake tool during this test.
     monkeypatch.setattr(
         "app.agent.graph.explain",
         FakeExplainTool()
@@ -2765,9 +2957,17 @@ def test_review_node_generates_general_review_without_weak_areas(
             "mastery_score": 75,
             "weak_areas": [],
         },
+        "user_message": (
+            "Review this topic with me."
+        ),
     }
 
     result = review_node(state)
+
+    assert (
+        retrieved_query["retrieval_query"]
+        == "Review this topic with me."
+    )
 
     assert result["response"] == (
         "General review of the key concepts "
@@ -3418,3 +3618,46 @@ def test_tutor_graph_initial_diagnostic_flow():
         "no prerequisite diagnostic assessment"
         in result["response"].lower()
     )
+
+def test_route_tutor_entry_to_assessment_submission():
+    """
+    Topic assessment questions and answers should
+    route directly to assessment submission.
+    """
+
+    state = {
+        "assessment_questions": [
+            {
+                "topic_id": 27,
+                "question_text": (
+                    "What value is assigned to a?"
+                ),
+            }
+        ],
+        "assessment_answers": [
+            {
+                "learner_answer": "4",
+            }
+        ],
+    }
+
+    result = route_tutor_entry(state)
+
+    assert result == "submit_assessment"
+
+
+def test_route_tutor_entry_continues_normal_tutor():
+    """
+    A normal learner message should continue
+    through the Tutor conversation workflow.
+    """
+
+    state = {
+        "user_message": (
+            "Explain Python variables to me."
+        ),
+    }
+
+    result = route_tutor_entry(state)
+
+    assert result == "continue_tutor"

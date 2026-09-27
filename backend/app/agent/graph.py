@@ -280,6 +280,50 @@ def route_initial_setup(state: TutorState) -> str:
     # for the selected learning path.
     return "generate_initial_diagnostic"
 
+def route_tutor_entry(
+    state: TutorState
+) -> str:
+    """
+    Decide whether to run initial setup,
+    submit an existing topic assessment,
+    or continue with the normal Tutor workflow.
+    """
+
+    selected_path = state.get(
+        "selected_path"
+    )
+
+    assessment_questions = state.get(
+        "assessment_questions",
+        []
+    )
+
+    assessment_answers = state.get(
+        "assessment_answers",
+        []
+    )
+
+    # Initial diagnostic flow.
+    if selected_path:
+        if (
+            assessment_questions
+            and assessment_answers
+        ):
+            return "submit_initial_diagnostic"
+
+        return "generate_initial_diagnostic"
+
+    # Existing topic assessment submission.
+    if (
+        assessment_questions
+        and assessment_answers
+    ):
+        return "submit_assessment"
+
+    # Normal Tutor conversation.
+    return "continue_tutor"
+
+
 
 def build_tutor_graph():
     """
@@ -419,11 +463,20 @@ def build_tutor_graph():
     # continue with the normal Tutor Agent flow.
     workflow.add_conditional_edges(
         "load_learner_context",
-        route_initial_setup,
+        route_tutor_entry,
         {
-            "generate_initial_diagnostic": "generate_initial_diagnostic",
-            "submit_initial_diagnostic": "submit_initial_diagnostic",
-            "continue_tutor": "load_conversation_history",
+            "generate_initial_diagnostic": (
+                "generate_initial_diagnostic"
+            ),
+            "submit_initial_diagnostic": (
+                "submit_initial_diagnostic"
+            ),
+            "submit_assessment": (
+                "submit_assessment"
+            ),
+            "continue_tutor": (
+                "load_conversation_history"
+            ),
         }
     )
 
@@ -656,8 +709,8 @@ def prepare_assessment_inputs(
     state: TutorState
 ) -> dict:
     """
-    Prepare the learner and topic information required
-    for generating an assessment.
+    Prepare the learner, topic, and request information
+    required for generating an assessment.
     """
 
     # Get the current topic selected by
@@ -672,6 +725,13 @@ def prepare_assessment_inputs(
     learner_context = state.get(
         "learner_context",
         {}
+    )
+
+    # Get the learner's current request so RAG
+    # can retrieve assessment-relevant material.
+    user_message = state.get(
+        "user_message",
+        ""
     )
 
     # Stop safely if no current topic
@@ -713,6 +773,7 @@ def prepare_assessment_inputs(
             state.get("assessment_type")
             or "topic"
         ),
+        "user_message": user_message,
     }
 
 
@@ -1120,11 +1181,13 @@ def generate_assessment_node(
     topic_id = current_topic["topic_id"]
     topic_name = current_topic["name"]
 
-    # Retrieve relevant course material for
-    # the current topic.
+    # Retrieve learning material from the current topic
+    # using the learner's specific assessment request
+    # as the semantic search query.
     context = retrieve_topic_context(
         topic_id=topic_id,
-        topic_name=topic_name
+        topic_name=topic_name,
+        retrieval_query=assessment_inputs["user_message"]
     )
 
     # Do not generate questions without grounded
@@ -1427,8 +1490,8 @@ def prepare_practice_inputs(
     state: TutorState
 ) -> dict:
     """
-    Prepare the learner, topic, and mastery information
-    required for generating personalized practice.
+    Prepare the learner, topic, mastery information,
+    and user request required for personalized practice.
     """
 
     # Load the learner's current topic and context.
@@ -1443,6 +1506,13 @@ def prepare_practice_inputs(
     topic_mastery = state.get(
         "topic_mastery",
         {}
+    )
+
+    # Load the learner's current request so RAG
+    # can retrieve material relevant to the request.
+    user_message = state.get(
+        "user_message",
+        ""
     )
 
     # Practice requires an active topic.
@@ -1477,6 +1547,7 @@ def prepare_practice_inputs(
         "topic_name": topic_name,
         "student_level": student_level,
         "weak_areas": weak_areas,
+        "user_message": user_message,
     }
 
 
@@ -1500,11 +1571,13 @@ def practice_node(
             )
         }
 
-    # Retrieve relevant learning material from
-    # the RAG knowledge base for the current topic.
+    # Retrieve learning material from the current topic
+    # using the learner's specific request as the
+    # semantic search query.
     context = retrieve_topic_context(
         topic_id=practice_inputs["topic_id"],
-        topic_name=practice_inputs["topic_name"]
+        topic_name=practice_inputs["topic_name"],
+        retrieval_query=practice_inputs["user_message"]
     )
 
     if not context:
@@ -1537,8 +1610,9 @@ def prepare_review_inputs(
     state: TutorState
 ) -> dict:
     """
-    Prepare the learner, topic, and mastery information
-    required for generating a personalized review.
+    Prepare the learner, topic, mastery information,
+    and user request required for generating a
+    personalized review.
     """
 
     # Load the learner's current topic and context.
@@ -1553,6 +1627,13 @@ def prepare_review_inputs(
     topic_mastery = state.get(
         "topic_mastery",
         {}
+    )
+
+    # Load the learner's current request so RAG
+    # can retrieve material relevant to the review.
+    user_message = state.get(
+        "user_message",
+        ""
     )
 
     # Review requires an active topic.
@@ -1587,6 +1668,7 @@ def prepare_review_inputs(
         "topic_name": topic_name,
         "student_level": student_level,
         "weak_areas": weak_areas,
+        "user_message": user_message,
     }
 
 
@@ -1595,11 +1677,12 @@ def review_node(
 ) -> dict:
     """
     Generate a personalized review using the learner's
-    current topic, mastery information, and retrieved context.
+    current topic, mastery information, user request,
+    and retrieved context.
     """
 
-    # Prepare the learner, topic, and mastery information
-    # required for the review workflow.
+    # Prepare the learner, topic, mastery information,
+    # and current request required for the review.
     review_inputs = prepare_review_inputs(state)
 
     if not review_inputs:
@@ -1610,11 +1693,13 @@ def review_node(
             )
         }
 
-    # Retrieve relevant learning material from
-    # the RAG knowledge base for the current topic.
+    # Retrieve learning material from the current topic
+    # using the learner's specific review request as the
+    # semantic search query.
     context = retrieve_topic_context(
         topic_id=review_inputs["topic_id"],
-        topic_name=review_inputs["topic_name"]
+        topic_name=review_inputs["topic_name"],
+        retrieval_query=review_inputs["user_message"]
     )
 
     if not context:

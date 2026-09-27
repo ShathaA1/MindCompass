@@ -8,6 +8,7 @@ from app.core.security import get_current_user
 from app.database.connection import get_db
 from app.database.models import ChatMessage, ChatSession
 from app.schemas.chat import (
+    AssessmentSubmissionRequest,
     ChatMessageRequest,
     ChatSessionCreate,
 )
@@ -52,21 +53,28 @@ def start_chat_session(
         "session_name": session.session_name,
         "started_at": session.started_at,
     }
+
+
 @router.get("/sessions")
 def get_chat_sessions(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Return chat sessions belonging to the authenticated learner.
+    Return chat sessions belonging to
+    the authenticated learner.
     """
 
     user_id = int(current_user["sub"])
 
     sessions = (
         db.query(ChatSession)
-        .filter(ChatSession.user_id == user_id)
-        .order_by(ChatSession.started_at.desc())
+        .filter(
+            ChatSession.user_id == user_id
+        )
+        .order_by(
+            ChatSession.started_at.desc()
+        )
         .all()
     )
 
@@ -113,90 +121,9 @@ def get_chat_messages(
 
     messages = (
         db.query(ChatMessage)
-        .filter(ChatMessage.session_id == session_id)
-        .order_by(
-            ChatMessage.created_at.asc(),
-            ChatMessage.chat_message_id.asc(),
-        )
-        .all()
-    )
-
-    return {
-        "session_id": session.chat_session_id,
-        "session_name": session.session_name,
-        "messages": [
-            {
-                "message_id": message.chat_message_id,
-                "role": message.role,
-                "content": message.content,
-                "agent_action": message.agent_action,
-                "created_at": message.created_at,
-            }
-            for message in messages
-        ],
-    }
-@router.get("/sessions")
-def get_chat_sessions(
-    current_user=Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Return chat sessions belonging to the authenticated learner.
-    """
-
-    user_id = int(current_user["sub"])
-
-    sessions = (
-        db.query(ChatSession)
-        .filter(ChatSession.user_id == user_id)
-        .order_by(ChatSession.started_at.desc())
-        .all()
-    )
-
-    return {
-        "sessions": [
-            {
-                "session_id": session.chat_session_id,
-                "session_name": session.session_name,
-                "started_at": session.started_at,
-                "ended_at": session.ended_at,
-            }
-            for session in sessions
-        ]
-    }
-
-
-@router.get("/{session_id}/messages")
-def get_chat_messages(
-    session_id: int,
-    current_user=Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Return stored messages from a chat session
-    belonging to the authenticated learner.
-    """
-
-    user_id = int(current_user["sub"])
-
-    session = (
-        db.query(ChatSession)
         .filter(
-            ChatSession.chat_session_id == session_id,
-            ChatSession.user_id == user_id,
+            ChatMessage.session_id == session_id
         )
-        .first()
-    )
-
-    if not session:
-        raise HTTPException(
-            status_code=404,
-            detail="Chat session not found.",
-        )
-
-    messages = (
-        db.query(ChatMessage)
-        .filter(ChatMessage.session_id == session_id)
         .order_by(
             ChatMessage.created_at.asc(),
             ChatMessage.chat_message_id.asc(),
@@ -218,6 +145,7 @@ def get_chat_messages(
             for message in messages
         ],
     }
+
 
 @router.post("/{session_id}/messages")
 def send_chat_message(
@@ -281,7 +209,10 @@ def send_chat_message(
     if not response:
         raise HTTPException(
             status_code=500,
-            detail="Tutor Agent did not generate a response.",
+            detail=(
+                "Tutor Agent did not generate "
+                "a response."
+            ),
         )
 
     # Read the final action selected by the agent.
@@ -315,4 +246,129 @@ def send_chat_message(
         "session_id": session_id,
         "response": response,
         "agent_action": agent_action,
+        "assessment_questions": result.get(
+            "assessment_questions",
+            [],
+        ),
+        "assessment_type": result.get(
+            "assessment_type"
+        ),
+    }
+
+
+@router.post("/{session_id}/assessment")
+def submit_chat_assessment(
+    session_id: int,
+    data: AssessmentSubmissionRequest,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Submit answers for a Tutor assessment and
+    return the updated mastery and recommendation.
+    """
+
+    # Get the authenticated learner ID.
+    user_id = int(current_user["sub"])
+
+    # Verify that the chat session exists and
+    # belongs to the authenticated learner.
+    session = (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.chat_session_id == session_id,
+            ChatSession.user_id == user_id,
+        )
+        .first()
+    )
+
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail="Chat session not found.",
+        )
+
+    # An assessment submission must contain
+    # the generated assessment questions.
+    if not data.assessment_questions:
+        raise HTTPException(
+            status_code=400,
+            detail="Assessment questions are missing.",
+        )
+
+    # Read the assessed topic from the generated
+    # questions. Topic assessments are generated
+    # for one current topic.
+    topic_id = data.assessment_questions[0].get(
+        "topic_id"
+    )
+
+    if not topic_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Assessment topic is missing.",
+        )
+
+    # Build the Tutor Agent workflow.
+    graph = build_tutor_graph()
+
+    # Restore the assessment state required by
+    # submit_assessment_node. The topic ID comes
+    # from the assessment that was generated for
+    # the learner.
+    initial_state = {
+        "user_id": user_id,
+        "session_id": session_id,
+        "assessment_type": data.assessment_type,
+        "assessment_questions": (
+            data.assessment_questions
+        ),
+        "assessment_answers": [
+            answer.model_dump()
+            for answer in data.assessment_answers
+        ],
+        "current_topic": {
+            "topic_id": topic_id,
+        },
+    }
+
+    try:
+        # Run the Tutor Agent workflow.
+        result = graph.invoke(initial_state)
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    # Read the assessment result response.
+    response = result.get("response")
+
+    if not response:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Tutor Agent did not generate "
+                "an assessment result."
+            ),
+        )
+
+    # Return the completed assessment information
+    # required by the Tutor frontend.
+    return {
+        "session_id": session_id,
+        "response": response,
+        "assessment_result": result.get(
+            "assessment_result"
+        ),
+        "topic_mastery": result.get(
+            "topic_mastery"
+        ),
+        "recommended_action": result.get(
+            "recommended_action"
+        ),
+        "recommendation_reason": result.get(
+            "recommendation_reason"
+        ),
     }
