@@ -35,6 +35,7 @@ from app.tools.quiz_generation import generate_quiz
 from app.tools.answer_evaluation import evaluate_answer
 from app.tools.explain import explain
 from app.tools.practice_generation import generate_practice
+from app.tools.feedback_generation import generate_feedback
 
 from app.rag.retrieval import retrieve
 
@@ -1680,6 +1681,49 @@ def submit_assessment_node(
             )
         )
 
+        # Prepare the completed assessment results
+        # for personalized feedback generation.
+        assessment_results_text = json.dumps(
+            evaluated_responses,
+            ensure_ascii=False,
+        )
+
+        # Convert weak areas into a format expected
+        # by the feedback generation tool.
+        weak_areas_text = json.dumps(
+            updated_topic_mastery.get(
+                "weak_areas",
+                []
+            ),
+            ensure_ascii=False,
+        )
+
+        # Load the learner's current level.
+        learner_context = state.get(
+            "learner_context",
+            {}
+        )
+
+        student_level = (
+            learner_context.get("current_level")
+            or learner_context.get("initial_level")
+            or "beginner"
+        )
+
+        # Generate personalized feedback based on
+        # assessment performance and current weak areas.
+        feedback_result = generate_feedback.invoke(
+            {
+                "assessment_results": assessment_results_text,
+                "weak_areas": weak_areas_text,
+                "student_level": student_level,
+            }
+        )
+
+        feedback = json.loads(
+            feedback_result
+        )
+
         # Load the learner's active learning path so
         # the current path item can be synchronized
         # with the latest assessment result.
@@ -1739,6 +1783,7 @@ def submit_assessment_node(
 
     return {
         "assessment_result": assessment_result,
+        "assessment_feedback": feedback,
         "topic_mastery": updated_topic_mastery,
         "current_topic": updated_current_topic,
         "recommended_action": recommendation[

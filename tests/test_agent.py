@@ -4765,3 +4765,148 @@ def test_generate_assessment_node_uses_personalization(
         ]
         == 27
     )
+
+def test_submit_assessment_node_generates_personalized_feedback(
+    monkeypatch
+):
+    """
+    Assessment submission should generate personalized
+    feedback using assessment results, weak areas,
+    and learner level.
+    """
+
+    state = {
+        "user_id": 2,
+        "current_topic": {
+            "topic_id": 12,
+            "name": "Building Your First Agent",
+        },
+        "learner_context": {
+            "current_level": "intermediate",
+        },
+        "assessment_type": "topic",
+        "assessment_questions": [
+            {
+                "topic_id": 12,
+                "question_text": "What is an AI agent?",
+                "question_type": "multiple_choice",
+                "options": ["A", "B", "C", "D"],
+                "correct_answer": "A",
+            }
+        ],
+        "assessment_answers": [
+            {
+                "learner_answer": "B",
+            }
+        ],
+    }
+
+    evaluated_responses = [
+        {
+            "topic_id": 12,
+            "question_text": "What is an AI agent?",
+            "question_type": "multiple_choice",
+            "options": ["A", "B", "C", "D"],
+            "correct_answer": "A",
+            "learner_answer": "B",
+            "is_correct": False,
+            "score_awarded": 0,
+            "feedback": "Review the definition of an AI agent.",
+        }
+    ]
+
+    monkeypatch.setattr(
+        "app.agent.graph.evaluate_assessment_responses",
+        lambda responses: evaluated_responses
+    )
+
+    class FakeAssessmentAttempt:
+        assessment_attempt_id = 100
+        score = 0
+        max_score = 1
+
+    monkeypatch.setattr(
+        "app.agent.graph.save_assessment_result",
+        lambda db, user_id, topic_id,
+        assessment_type, questions: FakeAssessmentAttempt()
+    )
+
+    updated_mastery = {
+        "mastery_score": 40.0,
+        "weak_areas": [
+            {
+                "area": "Agent definition",
+                "reason": "Incorrect answer.",
+            }
+        ],
+        "last_assessed_at": None,
+    }
+
+    monkeypatch.setattr(
+        "app.agent.graph.get_topic_mastery",
+        lambda db, user_id, topic_id: updated_mastery
+    )
+
+    monkeypatch.setattr(
+        "app.agent.graph.get_active_learning_path",
+        lambda db, user_id: None
+    )
+
+    captured_feedback_inputs = {}
+
+    class FakeFeedbackTool:
+        def invoke(self, inputs):
+            captured_feedback_inputs.update(
+                inputs
+            )
+
+            return json.dumps(
+                {
+                    "summary": (
+                        "The learner needs more review."
+                    ),
+                    "strengths": [],
+                    "weak_areas": [
+                        "Agent definition"
+                    ],
+                    "recommendation": (
+                        "Review the core concept."
+                    ),
+                }
+            )
+
+    monkeypatch.setattr(
+        "app.agent.graph.generate_feedback",
+        FakeFeedbackTool()
+    )
+
+    result = submit_assessment_node(
+        state
+    )
+
+    assert (
+        captured_feedback_inputs["student_level"]
+        == "intermediate"
+    )
+
+    assert (
+        "Agent definition"
+        in captured_feedback_inputs["weak_areas"]
+    )
+
+    assert (
+        "What is an AI agent?"
+        in captured_feedback_inputs[
+            "assessment_results"
+        ]
+    )
+
+    assert (
+        result["assessment_feedback"]["summary"]
+        == "The learner needs more review."
+    )
+
+    assert (
+        result["assessment_feedback"]["recommendation"]
+        == "Review the core concept."
+    )
