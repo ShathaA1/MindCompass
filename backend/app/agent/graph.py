@@ -602,18 +602,35 @@ def prepare_teaching_inputs(
     state: TutorState
 ) -> dict:
     """
-    Prepare the learner, topic, and user request
-    required for generating a personalized explanation.
+    Prepare learner, topic, mastery, preferences,
+    conversation context, and user request information
+    required for a personalized explanation.
     """
 
-    # Load the learner's current topic and context.
+    # Load the learner's current topic.
     current_topic = state.get(
         "current_topic",
         {}
     )
+
+    # Load learner profile and preferences.
     learner_context = state.get(
         "learner_context",
         {}
+    )
+
+    # Load the learner's current mastery
+    # information for this topic.
+    topic_mastery = state.get(
+        "topic_mastery",
+        {}
+    )
+
+    # Load recent conversation history so the
+    # explanation can remain context-aware.
+    conversation_history = state.get(
+        "conversation_history",
+        []
     )
 
     # Load the learner's current request so RAG
@@ -627,26 +644,55 @@ def prepare_teaching_inputs(
     if not current_topic:
         return {}
 
-    topic_id = current_topic.get("topic_id")
-    topic_name = current_topic.get("name")
+    topic_id = current_topic.get(
+        "topic_id"
+    )
+
+    topic_name = current_topic.get(
+        "name"
+    )
 
     # Stop safely if the topic information
     # is incomplete.
     if not topic_id or not topic_name:
         return {}
 
-    # Prefer the learner's current assessed level.
-    # Fall back to the initial self-reported level.
+    # Prefer the learner's latest assessed level.
     student_level = (
         learner_context.get("current_level")
         or learner_context.get("initial_level")
         or "beginner"
     )
 
+    # Load current mastery information.
+    mastery_score = topic_mastery.get(
+        "mastery_score"
+    )
+
+    weak_areas = topic_mastery.get(
+        "weak_areas",
+        []
+    )
+
+    # Load the learner's preferred learning format
+    # and pace from the learner profile.
+    preferred_format = learner_context.get(
+        "preferred_format"
+    )
+
+    preferred_pace = learner_context.get(
+        "preferred_pace"
+    )
+
     return {
         "topic_id": topic_id,
         "topic_name": topic_name,
         "student_level": student_level,
+        "mastery_score": mastery_score,
+        "weak_areas": weak_areas,
+        "preferred_format": preferred_format,
+        "preferred_pace": preferred_pace,
+        "conversation_history": conversation_history,
         "user_message": user_message,
     }
 
@@ -690,14 +736,97 @@ def teach_node(
             )
         }
 
-    # The explanation tool will be integrated
-    # in the next step.
+ 
+    # Build personalization instructions using
+    # the learner's current state and preferences.
+    personalization_parts = [
+        f'Teach the topic "{teaching_inputs["topic_name"]}".'
+    ]
+
+    mastery_score = teaching_inputs.get(
+        "mastery_score"
+    )
+
+    if mastery_score is not None:
+        personalization_parts.append(
+            f"The learner's current mastery score is "
+            f"{mastery_score:.0f}%."
+        )
+
+    weak_areas = teaching_inputs.get(
+        "weak_areas",
+        []
+    )
+
+    if weak_areas:
+        weak_area_names = []
+
+        for weak_area in weak_areas:
+            if isinstance(weak_area, dict):
+                area_name = weak_area.get(
+                    "area"
+                )
+
+                if area_name:
+                    weak_area_names.append(
+                        area_name
+                    )
+            else:
+                weak_area_names.append(
+                    str(weak_area)
+                )
+
+        if weak_area_names:
+            personalization_parts.append(
+                "Focus especially on these weak areas: "
+                + ", ".join(weak_area_names)
+                + "."
+            )
+
+    preferred_format = teaching_inputs.get(
+        "preferred_format"
+    )
+
+    if preferred_format:
+        personalization_parts.append(
+            "Preferred learning format: "
+            f"{preferred_format}."
+        )
+
+    preferred_pace = teaching_inputs.get(
+        "preferred_pace"
+    )
+
+    if preferred_pace:
+        personalization_parts.append(
+            "Preferred learning pace: "
+            f"{preferred_pace}."
+        )
+
+
+    user_message = teaching_inputs.get(
+        "user_message"
+    )
+
+    if user_message:
+        personalization_parts.append(
+            "The learner specifically asked: "
+            f"{user_message}"
+        )
+
+    personalized_topic = " ".join(
+        personalization_parts
+    )
+
     # Generate a personalized explanation using
-    # the retrieved topic context and learner level.
+    # learner mastery, weak areas, preferences,
+    # and retrieved course material.
     explanation = explain.invoke({
-        "topic": teaching_inputs["topic_name"],
+        "topic": personalized_topic,
         "context": context,
-        "student_level": teaching_inputs["student_level"],
+        "student_level": teaching_inputs[
+            "student_level"
+        ],
     })
 
     return {

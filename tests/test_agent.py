@@ -2584,14 +2584,34 @@ def test_prepare_teaching_inputs():
 
     result = prepare_teaching_inputs(state)
 
-    assert result == {
-        "topic_id": 12,
-        "topic_name": "Building Your First Agent",
-        "student_level": "intermediate",
-        "user_message": (
-            "Explain how an AI agent uses tools."
-        ),
-    }
+    assert result["topic_id"] == 12
+
+    assert (
+        result["topic_name"]
+        == "Building Your First Agent"
+    )
+
+    assert (
+        result["student_level"]
+        == "intermediate"
+    )
+
+    assert (
+        result["user_message"]
+        == "Explain how an AI agent uses tools."
+    )
+
+    # No mastery data was provided in this state.
+    assert result["mastery_score"] is None
+
+    assert result["weak_areas"] == []
+
+    # No learner preferences were provided.
+    assert result["preferred_format"] is None
+    assert result["preferred_pace"] is None
+
+    # No chat session history was provided.
+    assert result["conversation_history"] == []
 
 
 def test_prepare_teaching_inputs_without_topic():
@@ -2653,8 +2673,14 @@ def test_teach_node_generates_explanation(
     class FakeExplainTool:
         def invoke(self, inputs):
             assert (
-                inputs["topic"]
-                == "Building Your First Agent"
+                'Teach the topic "Building Your First Agent".'
+                in inputs["topic"]
+            )
+
+            assert (
+                "The learner specifically asked: "
+                "Explain how an AI agent uses tools."
+                in inputs["topic"]
             )
             assert (
                 inputs["student_level"]
@@ -2743,6 +2769,131 @@ def test_teach_node_stops_without_rag_context(
     result = teach_node(state)
 
     assert "no learning context" in result["response"]
+
+def test_teach_node_uses_personalization_data(
+    monkeypatch
+):
+    """
+    The teaching node should include learner mastery,
+    weak areas, and preferences in the explanation request.
+    """
+
+    # Mock RAG retrieval so the test does not
+    # call the real vector database.
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        lambda topic_id, topic_name, retrieval_query=None: (
+            "Python variables store values and can "
+            "be reassigned during program execution."
+        )
+    )
+
+    captured_inputs = {}
+
+    class FakeExplainTool:
+        def invoke(self, inputs):
+            # Capture the inputs sent to the explanation tool.
+            captured_inputs.update(inputs)
+
+            return (
+                "Personalized explanation generated."
+            )
+
+    monkeypatch.setattr(
+        "app.agent.graph.explain",
+        FakeExplainTool()
+    )
+
+    state = {
+        "current_topic": {
+            "topic_id": 27,
+            "name": "Python Reference Material",
+        },
+        "learner_context": {
+            "current_level": "beginner",
+            "preferred_format": "practical_examples",
+            "preferred_pace": "slow",
+        },
+        "topic_mastery": {
+            "mastery_score": 20.0,
+            "weak_areas": [
+                {
+                    "area": "Variable reassignment",
+                    "reason": "Incorrect understanding.",
+                },
+                {
+                    "area": "Multiple assignment order",
+                    "reason": "Values were reversed.",
+                },
+            ],
+        },
+        "conversation_history": [
+            {
+                "role": "user",
+                "content": "I find variables confusing.",
+            }
+        ],
+        "user_message": (
+            "Explain Python variables."
+        ),
+    }
+
+    result = teach_node(state)
+
+    personalized_topic = captured_inputs[
+        "topic"
+    ]
+
+    assert (
+        'Teach the topic '
+        '"Python Reference Material".'
+        in personalized_topic
+    )
+
+    assert (
+        "20%"
+        in personalized_topic
+    )
+
+    assert (
+        "Variable reassignment"
+        in personalized_topic
+    )
+
+    assert (
+        "Multiple assignment order"
+        in personalized_topic
+    )
+
+    assert (
+        "practical_examples"
+        in personalized_topic
+    )
+
+    assert (
+        "slow"
+        in personalized_topic
+    )
+
+    assert (
+        "Explain Python variables."
+        in personalized_topic
+    )
+
+    assert (
+        captured_inputs["student_level"]
+        == "beginner"
+    )
+
+    assert (
+        "Python variables store values"
+        in captured_inputs["context"]
+    )
+
+    assert (
+        result["response"]
+        == "Personalized explanation generated."
+    )
 
 
 def test_prepare_practice_inputs():
@@ -3984,3 +4135,89 @@ def test_route_tutor_entry_continues_normal_tutor():
     result = route_tutor_entry(state)
 
     assert result == "continue_tutor"
+
+
+def test_prepare_teaching_inputs_with_personalization():
+    """
+    Teaching inputs should include learner mastery,
+    preferences, conversation history, and current request.
+    """
+
+    state = {
+        "current_topic": {
+            "topic_id": 27,
+            "name": "Python Reference Material",
+        },
+        "learner_context": {
+            "current_level": "beginner",
+            "preferred_format": "practical_examples",
+            "preferred_pace": "slow",
+        },
+        "topic_mastery": {
+            "mastery_score": 20.0,
+            "weak_areas": [
+                {
+                    "area": "Variable reassignment",
+                    "reason": "Incorrect understanding.",
+                },
+                {
+                    "area": "Multiple assignment order",
+                    "reason": "Values were reversed.",
+                },
+            ],
+        },
+        "conversation_history": [
+            {
+                "role": "user",
+                "content": "I find variables confusing.",
+            }
+        ],
+        "user_message": "Explain Python variables.",
+    }
+
+    result = prepare_teaching_inputs(state)
+
+    assert result["topic_id"] == 27
+
+    assert (
+        result["topic_name"]
+        == "Python Reference Material"
+    )
+
+    assert (
+        result["student_level"]
+        == "beginner"
+    )
+
+    assert (
+        result["mastery_score"]
+        == 20.0
+    )
+
+    assert len(
+        result["weak_areas"]
+    ) == 2
+
+    assert (
+        result["weak_areas"][0]["area"]
+        == "Variable reassignment"
+    )
+
+    assert (
+        result["preferred_format"]
+        == "practical_examples"
+    )
+
+    assert (
+        result["preferred_pace"]
+        == "slow"
+    )
+
+    assert len(
+        result["conversation_history"]
+    ) == 1
+
+    assert (
+        result["user_message"]
+        == "Explain Python variables."
+    )
