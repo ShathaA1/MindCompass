@@ -1493,15 +1493,30 @@ def select_practice_type(
         or "machine learning" in topic_name_lower
         or "ml" in topic_name_lower
     )
+    # Normalize display labels from the frontend into
+    # the canonical values used by the agent.
+    preferred_format_key = None
+
+    if preferred_format:
+        preferred_format_key = (
+            preferred_format
+            .strip()
+            .lower()
+            .replace(" ", "_")
+        )
+        # Map the legacy onboarding label to its
+        # current equivalent for existing profiles.
+        if preferred_format_key == "explanations_with_examples":
+            preferred_format_key = "detailed_explanations"
 
     # Respect the learner's preferred format first.
-    if preferred_format == "concise_explanations":
+    if preferred_format_key == "concise_explanations":
         return "flashcards"
 
-    if preferred_format == "detailed_explanations":
+    if preferred_format_key == "detailed_explanations":
         return "short_answer"
 
-    if preferred_format in [
+    if preferred_format_key in [
         "guided_practice",
         "practical_examples",
     ]:

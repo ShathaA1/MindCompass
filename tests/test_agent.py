@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import json
+import pytest
 from app.database.connection import SessionLocal
 from app.agent.graph import (
     load_learner_context,
@@ -4922,3 +4923,62 @@ def test_review_node_uses_conversation_history(
         result["response"]
         == "Personalized review."
     )
+
+@pytest.mark.parametrize(
+    (
+        "preferred_format",
+        "topic_name",
+        "mastery_score",
+        "expected_type",
+    ),
+    [
+        (
+            "Concise Explanations",
+            "Python Variables",
+            90,
+            "flashcards",
+        ),
+        (
+            "Detailed Explanations",
+            "Python Variables",
+            20,
+            "short_answer",
+        ),
+        (
+            "Practical Examples",
+            "Python Variables",
+            20,
+            "coding",
+        ),
+        (
+            "Guided Practice",
+            "Agent Planning",
+            20,
+            "scenario",
+        ),
+        (
+            "Explanations with Examples",
+            "Python Variables",
+            90,
+            "short_answer",
+        ),
+    ],
+)
+def test_select_practice_type_accepts_frontend_labels(
+    preferred_format,
+    topic_name,
+    mastery_score,
+    expected_type,
+):
+    """
+    Frontend labels and the legacy label should map
+    to the practice types used internally by the agent.
+    """
+
+    result = select_practice_type(
+        topic_name=topic_name,
+        mastery_score=mastery_score,
+        preferred_format=preferred_format,
+    )
+
+    assert result == expected_type

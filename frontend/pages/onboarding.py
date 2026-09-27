@@ -9,7 +9,7 @@ LEARNING_STYLES = [
     "Concise Explanations",
     "Detailed Explanations",
     "Practical Examples",
-    "Explanations with Examples",
+    "Guided Practice",
 ]
 
 

@@ -5,7 +5,7 @@ LearningStyle = Literal[
     "Concise Explanations",
     "Detailed Explanations",
     "Practical Examples",
-    "Explanations with Examples",
+    "Guided Practice",
 ]
 class RegisterRequest(BaseModel):
     name: str
