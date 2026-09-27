@@ -740,6 +740,70 @@ def format_conversation_history(
     )
 
 
+def build_personalization_parts(
+    inputs: dict,
+    request_label: str,
+) -> list[str]:
+    """
+    Build shared personalization instructions using
+    learner mastery, preferences, request, and history.
+    """
+
+    parts = []
+
+    mastery_score = inputs.get(
+        "mastery_score"
+    )
+
+    if mastery_score is not None:
+        parts.append(
+            f"The learner's current mastery score is "
+            f"{mastery_score:.0f}%."
+        )
+
+    preferred_format = inputs.get(
+        "preferred_format"
+    )
+
+    if preferred_format:
+        parts.append(
+            "Preferred learning format: "
+            f"{preferred_format}."
+        )
+
+    preferred_pace = inputs.get(
+        "preferred_pace"
+    )
+
+    if preferred_pace:
+        parts.append(
+            "Preferred learning pace: "
+            f"{preferred_pace}."
+        )
+
+    user_message = inputs.get(
+        "user_message"
+    )
+
+    if user_message:
+        parts.append(
+            f"{request_label}: {user_message}"
+        )
+
+    conversation_context = format_conversation_history(
+        inputs.get(
+            "conversation_history"
+        )
+    )
+
+    if conversation_context:
+        parts.append(
+            "Recent conversation context: "
+            + conversation_context
+        )
+
+    return parts
+
 def teach_node(
     state: TutorState
 ) -> dict:
@@ -778,23 +842,18 @@ def teach_node(
             )
         }
 
- 
-    # Build personalization instructions using
-    # the learner's current state and preferences.
+
     personalization_parts = [
         f'Teach the topic "{teaching_inputs["topic_name"]}".'
     ]
-
-    mastery_score = teaching_inputs.get(
-        "mastery_score"
-    )
-
-    if mastery_score is not None:
-        personalization_parts.append(
-            f"The learner's current mastery score is "
-            f"{mastery_score:.0f}%."
+    
+    personalization_parts.extend(
+        build_personalization_parts(
+            inputs=teaching_inputs,
+            request_label="The learner specifically asked",
         )
-
+    )
+    
     weak_area_names = normalize_weak_areas(
         teaching_inputs.get(
             "weak_areas"
@@ -808,52 +867,7 @@ def teach_node(
             + "."
     )
 
-    preferred_format = teaching_inputs.get(
-        "preferred_format"
-    )
-
-    if preferred_format:
-        personalization_parts.append(
-            "Preferred learning format: "
-            f"{preferred_format}."
-        )
-
-    preferred_pace = teaching_inputs.get(
-        "preferred_pace"
-    )
-
-    if preferred_pace:
-        personalization_parts.append(
-            "Preferred learning pace: "
-            f"{preferred_pace}."
-        )
-
-
-    user_message = teaching_inputs.get(
-        "user_message"
-    )
-
-    if user_message:
-        personalization_parts.append(
-            "The learner specifically asked: "
-            f"{user_message}"
-        )
-
-
-    # Include recent conversation context so the
-    # explanation remains consistent across turns.
-    conversation_context = format_conversation_history(
-        teaching_inputs.get(
-            "conversation_history"
-        )
-    )
-
-    if conversation_context:
-        personalization_parts.append(
-            "Recent conversation context: "
-            + conversation_context
-        )
-
+    
 
     personalized_topic = " ".join(
         personalization_parts
@@ -1406,18 +1420,16 @@ def generate_assessment_node(
     # Build personalized assessment instructions
     # using learner mastery, weak areas, and preferences.
     assessment_topic_parts = [
-        f'Assess the topic "{topic_name}".'
+    f'Assess the topic "{topic_name}".'
     ]
 
-    mastery_score = assessment_inputs.get(
-        "mastery_score"
+    assessment_topic_parts.extend(
+        build_personalization_parts(
+            inputs=assessment_inputs,
+            request_label="The learner specifically requested",
+        )
     )
 
-    if mastery_score is not None:
-        assessment_topic_parts.append(
-            f"The learner's current mastery score is "
-            f"{mastery_score:.0f}%."
-        )
 
     weak_area_names = normalize_weak_areas(
         assessment_inputs.get(
@@ -1432,36 +1444,7 @@ def generate_assessment_node(
             + "."
         )
 
-    preferred_format = assessment_inputs.get(
-        "preferred_format"
-    )
-
-    if preferred_format:
-        assessment_topic_parts.append(
-            "Preferred learning format: "
-            f"{preferred_format}."
-        )
-
-    preferred_pace = assessment_inputs.get(
-        "preferred_pace"
-    )
-
-    if preferred_pace:
-        assessment_topic_parts.append(
-            "Preferred learning pace: "
-            f"{preferred_pace}."
-        )
-
-    user_message = assessment_inputs.get(
-        "user_message"
-    )
-
-    if user_message:
-        assessment_topic_parts.append(
-            "The learner specifically requested: "
-            f"{user_message}"
-        )
-
+    
     personalized_assessment_topic = " ".join(
         assessment_topic_parts
     )
@@ -2001,62 +1984,15 @@ def practice_node(
     # Build personalization instructions using
     # the learner's mastery and profile preferences.
     personalization_parts = [
-        f'Practice the topic "{practice_inputs["topic_name"]}".'
+    f'Practice the topic "{practice_inputs["topic_name"]}".'
     ]
 
-    mastery_score = practice_inputs.get(
-        "mastery_score"
-    )
-
-    if mastery_score is not None:
-        personalization_parts.append(
-            f"The learner's current mastery score is "
-            f"{mastery_score:.0f}%."
-        )
-
-    preferred_format = practice_inputs.get(
-        "preferred_format"
-    )
-
-    if preferred_format:
-        personalization_parts.append(
-            "Preferred learning format: "
-            f"{preferred_format}."
-        )
-
-    preferred_pace = practice_inputs.get(
-        "preferred_pace"
-    )
-
-    if preferred_pace:
-        personalization_parts.append(
-            "Preferred learning pace: "
-            f"{preferred_pace}."
-        )
-
-    user_message = practice_inputs.get(
-        "user_message"
-    )
-
-    if user_message:
-        personalization_parts.append(
-            "The learner specifically requested: "
-            f"{user_message}"
-        )
-
-    # Include recent conversation context so practice
-    # can build on what the learner discussed previously.
-    conversation_context = format_conversation_history(
-        practice_inputs.get(
-            "conversation_history"
+    personalization_parts.extend(
+        build_personalization_parts(
+            inputs=practice_inputs,
+            request_label="The learner specifically requested",
         )
     )
-
-    if conversation_context:
-        personalization_parts.append(
-            "Recent conversation context: "
-            + conversation_context
-        )
 
     personalized_topic = " ".join(
         personalization_parts
@@ -2150,18 +2086,16 @@ def review_node(
     # Build a personalized review request using
     # mastery, weak areas, preferences, and user intent.
     review_parts = [
-        f'Review the topic "{review_inputs["topic_name"]}".'
+    f'Review the topic "{review_inputs["topic_name"]}".'
     ]
 
-    mastery_score = review_inputs.get(
-        "mastery_score"
+    review_parts.extend(
+        build_personalization_parts(
+            inputs=review_inputs,
+            request_label="The learner specifically requested",
+        )
     )
 
-    if mastery_score is not None:
-        review_parts.append(
-            f"The learner's current mastery score is "
-            f"{mastery_score:.0f}%."
-        )
 
     weak_area_names = normalize_weak_areas(
         review_inputs.get(
@@ -2181,51 +2115,6 @@ def review_node(
             "and reinforce the most important ideas."
         )
         
-
-    preferred_format = review_inputs.get(
-        "preferred_format"
-    )
-
-    if preferred_format:
-        review_parts.append(
-            "Preferred learning format: "
-            f"{preferred_format}."
-        )
-
-    preferred_pace = review_inputs.get(
-        "preferred_pace"
-    )
-
-    if preferred_pace:
-        review_parts.append(
-            "Preferred learning pace: "
-            f"{preferred_pace}."
-        )
-
-    user_message = review_inputs.get(
-        "user_message"
-    )
-
-    if user_message:
-        review_parts.append(
-            "The learner specifically requested: "
-            f"{user_message}"
-        )
-
-
-    # Include recent conversation context so review
-    # can reinforce material discussed earlier.
-    conversation_context = format_conversation_history(
-        review_inputs.get(
-            "conversation_history"
-        )
-    )
-
-    if conversation_context:
-        review_parts.append(
-            "Recent conversation context: "
-            + conversation_context
-        )
 
 
     review_topic = " ".join(
