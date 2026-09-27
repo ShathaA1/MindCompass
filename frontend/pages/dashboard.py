@@ -5,6 +5,77 @@ import streamlit as st
 from api_client import get_dashboard
 
 
+
+def get_topic_display_name(
+    topic_id: int | None,
+    original_name: str,
+) -> str:
+    """
+    Return a learner-friendly topic name without
+    changing the internal database topic name.
+    """
+
+    display_names = {
+        1: "Python Diagnostic",
+        2: "Machine Learning Diagnostic",
+        27: "Python Foundations for Agentic AI",
+        26: "Machine Learning Foundations for Agentic AI",
+    }
+
+    return display_names.get(
+        topic_id,
+        original_name,
+    )
+
+
+def format_recommended_action(
+    action: str | None,
+) -> str:
+    """
+    Convert the internal agent action into
+    a learner-friendly recommendation.
+    """
+
+    action_labels = {
+        "explain": "Learn the concept",
+        "practice": "Practice",
+        "review": "Review weak areas",
+        "assess": "Take an assessment",
+        "recommend": "Move to the next topic",
+    }
+
+    if not action:
+        return "Continue learning"
+
+    return action_labels.get(
+        action,
+        action.replace("_", " ").title(),
+    )
+
+
+def format_weak_area(
+    weak_area,
+) -> tuple[str, str]:
+    """
+    Convert a stored weak-area value into a readable
+    area name and optional explanation.
+    """
+
+    if isinstance(weak_area, dict):
+        area = weak_area.get(
+            "area",
+            "Learning gap",
+        )
+
+        reason = weak_area.get(
+            "reason",
+            "",
+        )
+
+        return area, reason
+
+    return str(weak_area), ""
+
 def render():
     """Display the learner dashboard."""
 
@@ -79,13 +150,8 @@ def render():
             0,
         )
 
-        topics_assessed = data.get(
-            "topics_assessed",
-            0,
-        )
 
         current_topic = data.get("current_topic")
-        average_mastery = data.get("average_mastery")
         recommended_action = data.get("recommended_action")
 
         topic_masteries = data.get(
@@ -93,24 +159,77 @@ def render():
             [],
         )
 
-        weak_areas = data.get(
-            "weak_areas",
-            [],
+        # Exclude diagnostic-only mastery records
+        # from learner-facing progress calculations.
+        visible_masteries = [
+            mastery
+            for mastery in topic_masteries
+            if mastery.get("topic_id") not in [1, 2]
+        ]
+
+        # Calculate average mastery using only actual
+        # learning topics shown to the learner.
+        average_mastery = (
+            round(
+                sum(
+                    mastery.get(
+                        "mastery_score",
+                        0,
+                    )
+                    for mastery in visible_masteries
+                ) / len(visible_masteries),
+                1,
+            )
+            if visible_masteries
+            else None
+        )
+
+        # Count only learner-facing assessed topics.
+        topics_assessed = len(
+            visible_masteries
+        )
+
+        # Show weak areas only for the learner's
+        # current learning topic.
+        current_topic_id = (
+            current_topic.get("topic_id")
+            if current_topic
+            else None
+        )
+
+        current_topic_mastery = next(
+            (
+                mastery
+                for mastery in topic_masteries
+                if mastery.get("topic_id")
+                == current_topic_id
+            ),
+            None,
+        )
+
+        weak_areas = (
+            current_topic_mastery.get(
+                "weak_areas",
+                [],
+            )
+            if current_topic_mastery
+            else []
         )
 
         current_topic_name = (
-            current_topic.get(
-                "topic_name",
-                "Current Topic",
+            get_topic_display_name(
+                current_topic.get("topic_id"),
+                current_topic.get(
+                    "topic_name",
+                    "Current Topic",
+                ),
             )
             if current_topic
             else "Learning Path Completed"
         )
 
-        action_label = (
-            recommended_action.title()
-            if recommended_action
-            else "Continue"
+        action_label = format_recommended_action(
+        recommended_action
         )
 
         mastery_label = (
@@ -225,16 +344,30 @@ def render():
             unsafe_allow_html=True,
         )
 
-        if topic_masteries:
+
+        visible_masteries = [
+            mastery
+            for mastery in topic_masteries
+            if mastery.get("topic_id") not in [1, 2]
+        ]
+
+        if visible_masteries:
             mastery_html = (
                 '<div class="mc-dashboard-panel '
                 'mc-dashboard-mastery-panel">'
             )
 
-            for mastery in topic_masteries:
-                topic_name = mastery.get(
-                    "topic_name",
-                    "Topic",
+            for mastery in visible_masteries:
+                topic_id = mastery.get(
+                "topic_id"
+                )
+
+                topic_name = get_topic_display_name(
+                    topic_id,
+                    mastery.get(
+                        "topic_name",
+                        "Topic",
+                    ),
                 )
 
                 score = mastery.get(
@@ -242,6 +375,7 @@ def render():
                     0,
                 )
 
+                
                 mastery_html += (
                     '<div class="mc-dashboard-mastery-item">'
                     '<div class="mc-dashboard-mastery-header">'
@@ -277,14 +411,20 @@ def render():
         )
 
         if weak_areas:
-            weak_areas_html = "".join(
-                (
+            weak_areas_html = ""
+
+            for weak_area in weak_areas:
+                area, _ = format_weak_area(
+                    weak_area
+                )
+
+                weak_areas_html += (
                     '<span class="mc-dashboard-weak-area">'
                     f"{area}"
                     "</span>"
                 )
-                for area in weak_areas
-            )
+
+            weak_areas_html += "</div>"
 
             st.markdown(
                 (
