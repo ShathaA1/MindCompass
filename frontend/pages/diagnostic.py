@@ -200,6 +200,30 @@ def start_selected_diagnostic(
 
     data = response.json()
 
+
+    diagnostic_questions = data.get(
+        "assessment_questions",
+        [],
+    )
+
+
+    # Paths without prerequisite diagnostics can
+    # continue directly to the generated learning path.
+    if not diagnostic_questions:
+        st.session_state[
+            "diagnostic_result"
+        ] = data
+
+        st.session_state[
+            "setup_complete"
+        ] = True
+
+        st.session_state[
+            "page"
+        ] = "Learning Path"
+
+        st.rerun()
+        
     # Store the diagnostic data so it remains
     # available across Streamlit reruns.
     st.session_state["diagnostic_topics"] = data.get(

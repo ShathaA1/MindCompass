@@ -1439,7 +1439,8 @@ def test_get_available_learning_path_invalid():
 def test_get_diagnostic_topics_agentic_ai():
     """
     Test that the Agentic AI path loads
-    both Python and Machine Learning prerequisites.
+    Python and Machine Learning prerequisite
+    diagnostic topics.
     """
 
     with SessionLocal() as db:
@@ -1448,19 +1449,21 @@ def test_get_diagnostic_topics_agentic_ai():
             "agentic_ai"
         )
 
-        assert len(result) == 2
-
-        assert result[0]["topic_id"] == 1
-        assert result[0]["topic"] == "Python Basics"
-
-        assert result[1]["topic_id"] == 2
-        assert result[1]["topic"] == "Machine Learning Basics"
-
+    assert result == [
+        {
+            "topic_id": 1,
+            "topic": "Python Basics",
+        },
+        {
+            "topic_id": 2,
+            "topic": "Machine Learning Basics",
+        },
+    ]
 
 def test_get_diagnostic_topics_machine_learning():
     """
     Test that the Machine Learning path loads
-    the Python prerequisite topic.
+    the Python prerequisite diagnostic topic.
     """
 
     with SessionLocal() as db:
@@ -1469,15 +1472,17 @@ def test_get_diagnostic_topics_machine_learning():
             "machine_learning"
         )
 
-        assert len(result) == 1
-        assert result[0]["topic_id"] == 1
-        assert result[0]["topic"] == "Python Basics"
-
+    assert result == [
+        {
+            "topic_id": 1,
+            "topic": "Python Basics",
+        }
+    ]
 
 def test_get_diagnostic_topics_python():
     """
-    Test that the Python path currently has
-    no prerequisite diagnostic topics.
+    Test that the Python path does not require
+    a prerequisite diagnostic assessment.
     """
 
     with SessionLocal() as db:
@@ -1486,7 +1491,7 @@ def test_get_diagnostic_topics_python():
             "python"
         )
 
-        assert result == []
+    assert result == []
 
 def test_agentic_ai_required_topics():
     """

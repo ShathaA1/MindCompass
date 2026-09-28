@@ -273,16 +273,10 @@ def test_dashboard_summary():
         assert data["recommended_action"] == "explain"
 
         # Verify mastery information is available.
-        assert data["topics_assessed"] >= 1
-        assert data["average_mastery"] is not None
-        assert isinstance(
-            data["topic_masteries"],
-            list,
-        )
-        assert isinstance(
-            data["weak_areas"],
-            list,
-        )
+        assert data["topics_assessed"] == 0
+        assert data["average_mastery"] is None
+        assert data["topic_masteries"] == []
+        assert data["weak_areas"] == []
 
     finally:
         # Always remove the authentication override

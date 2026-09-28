@@ -3260,18 +3260,47 @@ def test_generate_initial_diagnostic_without_selected_path():
         assert "assessment_questions" not in result
 
 
-def test_generate_initial_diagnostic_without_required_topics():
+def test_generate_initial_diagnostic_without_required_topics(
+    monkeypatch
+):
     """
-    Test that no diagnostic quiz is generated
-    when the selected path has no prerequisite topics.
+    Test that a learning path is created directly
+    when no prerequisite diagnostic is required.
     """
+
+    monkeypatch.setattr(
+        "app.agent.graph.create_learning_path",
+        lambda db,
+        user_id,
+        target_topic_id,
+        path_name,
+        goal: {
+            "learning_path_id": 100,
+            "user_id": user_id,
+            "name": path_name,
+            "goal": goal,
+            "status": "active",
+            "topic_ids": list(range(35, 43)),
+        }
+    )
+
+    monkeypatch.setattr(
+        "app.agent.graph.select_next_topic",
+        lambda db, learning_path_id: {
+            "topic_id": 35,
+            "name": "Ch1 Introduction To Python",
+            "status": "pending",
+            "recommended_action": "explain",
+        }
+    )
 
     with SessionLocal() as db:
         state = {
+            "user_id": 2,
             "selected_path": "python",
             "learner_context": {
                 "current_level": "beginner"
-            }
+            },
         }
 
         result = generate_initial_diagnostic_node(
@@ -3279,84 +3308,105 @@ def test_generate_initial_diagnostic_without_required_topics():
             db
         )
 
-        assert result["diagnostic_topics"] == []
-        assert result["assessment_type"] == "diagnostic"
-        assert result["assessment_questions"] == []
+    assert result["diagnostic_topics"] == []
+    assert result["assessment_questions"] == []
 
-        assert (
-            "no prerequisite diagnostic assessment"
-            in result["response"].lower()
+    assert (
+        result["learning_path"]["learning_path_id"]
+        == 100
+    )
+
+    assert result["next_topic_id"] == 35
+
+    assert (
+        result["response"]
+        == (
+            "No prerequisite diagnostic assessment "
+            "is required. Your learning path is ready."
         )
+    )
 
-def test_generate_initial_diagnostic_agentic_ai(monkeypatch):
+
+def test_generate_initial_diagnostic_agentic_ai(
+    monkeypatch
+):
     """
     Test that the Agentic AI path generates
-    a diagnostic quiz for its prerequisite topics.
+    a prerequisite diagnostic across Python
+    and Machine Learning.
     """
 
-    fake_questions = [
-        {
-            "topic_id": 1,
-            "question": "What is a Python variable?",
-        },
-        {
-            "topic_id": 2,
-            "question": "What is supervised learning?",
-        },
-    ]
+    quiz_calls = []
 
-    class FakeQuizTool:
-        def invoke(self, inputs):
-            # Verify that the diagnostic tool receives
-            # the correct assessment configuration.
-            assert inputs["assessment_type"] == "diagnostic"
-
-            assert inputs["topics"] == [
-                {
-                    "topic_id": 1,
-                    "topic": "Python Basics",
-                },
-                {
-                    "topic_id": 2,
-                    "topic": "Machine Learning Basics",
-                },
-            ]
-
-            return json.dumps(
-                {
-                    "questions": fake_questions
-                }
-            )
-
-    # Prevent the test from calling the real RAG pipeline.
-    # Accept retrieval_query because diagnostic retrieval
-    # now supports focused semantic search queries.
     monkeypatch.setattr(
         "app.agent.graph.retrieve_topic_context",
         lambda topic_id, topic_name, retrieval_query=None:
             f"Context for {topic_name}"
     )
 
-    # Prevent the test from calling the real LLM.
+    class FakeQuizTool:
+        def invoke(self, inputs):
+            quiz_calls.append(
+                {
+                    "topics": inputs["topics"],
+                    "num_questions": inputs[
+                        "num_questions"
+                    ],
+                    "assessment_type": inputs[
+                        "assessment_type"
+                    ],
+                }
+            )
+
+            topic_id = inputs["topics"][0][
+                "topic_id"
+            ]
+
+            return json.dumps(
+                {
+                    "questions": [
+                        {
+                            "topic_id": topic_id,
+                            "question_text": (
+                                f"Diagnostic question {i}"
+                            ),
+                            "question_type": (
+                                "multiple_choice"
+                            ),
+                            "difficulty": "beginner",
+                            "options": [
+                                "A",
+                                "B",
+                                "C",
+                                "D",
+                            ],
+                            "correct_answer": "A",
+                        }
+                        for i in range(
+                            1,
+                            inputs["num_questions"] + 1
+                        )
+                    ]
+                }
+            )
+
     monkeypatch.setattr(
         "app.agent.graph.generate_quiz",
         FakeQuizTool()
     )
 
-    with SessionLocal() as db:
-        state = {
-            "selected_path": "agentic_ai",
-            "learner_context": {
-                "current_level": "beginner"
-            }
-        }
+    state = {
+        "selected_path": "agentic_ai",
+        "learner_context": {
+            "current_level": "beginner"
+        },
+    }
 
+    with SessionLocal() as db:
         result = generate_initial_diagnostic_node(
             state,
             db
         )
-
-    assert result["assessment_type"] == "diagnostic"
 
     assert result["diagnostic_topics"] == [
         {
@@ -3369,82 +3419,107 @@ def test_generate_initial_diagnostic_agentic_ai(monkeypatch):
         },
     ]
 
-    assert result["assessment_questions"] == fake_questions
-    assert result["response"] == (
-        "Your diagnostic assessment is ready."
-    )
+    assert quiz_calls == [
+        {
+            "topics": [
+                {
+                    "topic_id": 1,
+                    "topic": "Python Basics",
+                }
+            ],
+            "num_questions": 5,
+            "assessment_type": "diagnostic",
+        },
+        {
+            "topics": [
+                {
+                    "topic_id": 2,
+                    "topic": "Machine Learning Basics",
+                }
+            ],
+            "num_questions": 5,
+            "assessment_type": "diagnostic",
+        },
+    ]
+
+    assert len(
+        result["assessment_questions"]
+    ) == 10
 
 
 def test_initial_diagnostic_uses_rag_backed_reference_topics(
     monkeypatch
 ):
     """
-    Test that the initial diagnostic uses the correct
-    RAG-backed reference topics and focused retrieval queries.
-
-    Diagnostic Topic 1 (Python) -> RAG Topic 27
-    Diagnostic Topic 2 (ML)     -> RAG Topic 26
+    Test that the Agentic AI prerequisite diagnostic
+    retrieves grounded context from the current
+    Python and Machine Learning curricula.
     """
 
     retrieved_topic_ids = []
     retrieval_queries = []
 
-    # Capture the topic IDs and retrieval queries sent
-    # to the RAG retriever.
     def mock_retrieve_topic_context(
         topic_id,
         topic_name,
         retrieval_query=None
     ):
-        retrieved_topic_ids.append(topic_id)
-        retrieval_queries.append(retrieval_query)
+        retrieved_topic_ids.append(
+            topic_id
+        )
+
+        retrieval_queries.append(
+            retrieval_query
+        )
 
         return (
             f"Learning material for {topic_name}."
         )
 
-    # Return a valid quiz so the diagnostic node
-    # can complete without calling the real LLM.
     class MockGenerateQuiz:
         def invoke(self, inputs):
+            topic_id = inputs["topics"][0][
+                "topic_id"
+            ]
+
             return json.dumps(
                 {
                     "questions": [
                         {
-                            "topic_id": 1,
+                            "topic_id": topic_id,
                             "question_text": (
-                                "What is a Python variable?"
+                                f"Question {i}"
                             ),
-                            "question_type": "multiple_choice",
+                            "question_type": (
+                                "multiple_choice"
+                            ),
                             "difficulty": "beginner",
                             "options": [
-                                "A named value",
-                                "A database",
-                                "A model",
-                                "A network",
+                                "A",
+                                "B",
+                                "C",
+                                "D",
                             ],
-                            "correct_answer": "A named value",
+                            "correct_answer": "A",
                         }
+                        for i in range(
+                            1,
+                            inputs["num_questions"] + 1
+                        )
                     ]
                 }
             )
 
-    # Replace the real RAG retrieval function with
-    # the test mock.
     monkeypatch.setattr(
         "app.agent.graph.retrieve_topic_context",
         mock_retrieve_topic_context
     )
 
-    # Replace the real quiz generator with
-    # the test mock.
     monkeypatch.setattr(
         "app.agent.graph.generate_quiz",
         MockGenerateQuiz()
     )
 
-    # Simulate an Agentic AI learner who needs
-    # the initial prerequisite diagnostic.
     state = {
         "selected_path": "agentic_ai",
         "learner_context": {
@@ -3452,70 +3527,39 @@ def test_initial_diagnostic_uses_rag_backed_reference_topics(
         },
     }
 
-    # Run the diagnostic generation node.
     with SessionLocal() as db:
         result = generate_initial_diagnostic_node(
             state,
             db
         )
 
-    # ---------------------------------------------------------
-    # Verify RAG source mapping
-    # ---------------------------------------------------------
-
-    # Python diagnostic Topic 1 must retrieve
-    # from the actual Python reference material Topic 27.
-    #
-    # Machine Learning diagnostic Topic 2 must retrieve
-    # from the actual ML reference material Topic 26.
-    assert retrieved_topic_ids == [27, 26]
-
-    # ---------------------------------------------------------
-    # Verify focused retrieval queries
-    # ---------------------------------------------------------
-
-    assert retrieval_queries == [
-        (
-            "Python fundamentals including variables, data types, "
-            "lists, dictionaries, control flow, loops, conditions, "
-            "functions, and basic Python behavior"
-        ),
-        (
-            "Machine learning fundamentals including supervised "
-            "and unsupervised learning, classification, regression, "
-            "clustering, features, labels, model training, "
-            "and evaluation"
-        ),
-    ]
-
-    # ---------------------------------------------------------
-    # Verify diagnostic topic identities
-    # ---------------------------------------------------------
-
-    # The diagnostic topics must remain 1 and 2 because
-    # mastery results are stored against these topics.
-    assert [
-        topic["topic_id"]
-        for topic in result["diagnostic_topics"]
-    ] == [1, 2]
-
-    # ---------------------------------------------------------
-    # Verify assessment type
-    # ---------------------------------------------------------
-
-    assert (
-        result["assessment_type"]
-        == "diagnostic"
+    assert retrieved_topic_ids == (
+        list(range(35, 43))
+        + list(range(28, 35))
     )
 
-    # ---------------------------------------------------------
-    # Verify questions were generated
-    # ---------------------------------------------------------
+    python_query = (
+        "Python fundamentals including variables, data types, "
+        "operators, strings, conditions, loops, collections, "
+        "functions, and basic Python programming concepts"
+    )
+
+    ml_query = (
+        "Machine learning fundamentals including supervised "
+        "learning, unsupervised learning, deep learning, "
+        "reinforcement learning, ensemble learning, "
+        "classification, regression, clustering, model training, "
+        "and evaluation"
+    )
+
+    assert retrieval_queries == (
+        [python_query] * 8
+        + [ml_query] * 7
+    )
 
     assert len(
         result["assessment_questions"]
-    ) == 1
-
+    ) == 10
 
 
 def test_submit_initial_diagnostic_node(monkeypatch):
@@ -3865,24 +3909,51 @@ def test_route_tutor_entry_to_submit_diagnostic():
     assert result == "submit_initial_diagnostic"
 
 
-def test_tutor_graph_initial_diagnostic_flow():
+def test_tutor_graph_initial_diagnostic_flow(
+    monkeypatch
+):
     """
-    Test that the compiled Tutor Agent graph can route
-    a newly selected learning path through initial setup.
+    Test that the compiled Tutor Agent graph creates
+    the Python learning path directly when no
+    prerequisite diagnostic is required.
     """
 
-    # Build the real compiled LangGraph workflow.
+    monkeypatch.setattr(
+        "app.agent.graph.create_learning_path",
+        lambda db,
+        user_id,
+        target_topic_id,
+        path_name,
+        goal: {
+            "learning_path_id": 100,
+            "user_id": user_id,
+            "name": path_name,
+            "goal": goal,
+            "status": "active",
+            "topic_ids": list(range(35, 43)),
+        }
+    )
+
+    monkeypatch.setattr(
+        "app.agent.graph.select_next_topic",
+        lambda db, learning_path_id: {
+            "topic_id": 35,
+            "name": "Ch1 Introduction To Python",
+            "status": "pending",
+            "recommended_action": "explain",
+        }
+    )
+
     graph = build_tutor_graph()
 
-    # Python currently has no prerequisite diagnostic topics,
-    # so this test does not require RAG or an LLM call.
     state = {
         "user_id": 2,
         "selected_path": "python",
     }
 
-    # Run the actual compiled graph.
-    result = graph.invoke(state)
+    result = graph.invoke(
+        state
+    )
 
     assert result["selected_path"] == "python"
     assert result["assessment_type"] == "diagnostic"
@@ -3890,8 +3961,18 @@ def test_tutor_graph_initial_diagnostic_flow():
     assert result["assessment_questions"] == []
 
     assert (
-        "no prerequisite diagnostic assessment"
-        in result["response"].lower()
+        result["learning_path"]["learning_path_id"]
+        == 100
+    )
+
+    assert result["next_topic_id"] == 35
+
+    assert (
+        result["response"]
+        == (
+            "No prerequisite diagnostic assessment "
+            "is required. Your learning path is ready."
+        )
     )
 
 def test_route_tutor_entry_to_assessment_submission():

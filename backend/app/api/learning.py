@@ -51,14 +51,22 @@ def dashboard(
         .first()
     )
 
-    # Load all mastery records with their topic information.
+    # Exclude structural diagnostic topics from
+    # learner-facing mastery statistics.
+    structural_topic_ids = {1, 2, 3}
+
     mastery_records = (
         db.query(TopicMastery, Topic)
         .join(
             Topic,
             TopicMastery.topic_id == Topic.topic_id,
         )
-        .filter(TopicMastery.user_id == user_id)
+        .filter(
+            TopicMastery.user_id == user_id,
+            ~TopicMastery.topic_id.in_(
+                structural_topic_ids
+            ),
+        )
         .all()
     )
 
@@ -301,6 +309,17 @@ def start_initial_diagnostic(
             "assessment_questions",
             [],
         ),
+        "learning_path": result.get(
+            "learning_path",
+            {},
+        ),
+        "current_topic": result.get(
+            "current_topic",
+            {},
+        ),
+        "next_topic_id": result.get(
+            "next_topic_id"
+        ),
         "message": result.get("response"),
     }
 
@@ -360,6 +379,8 @@ def submit_initial_diagnostic(
             "current_topic",
             {},
         ),
-        "next_topic_id": result.get("next_topic_id"),
+        "next_topic_id": result.get(
+            "next_topic_id"
+        ),
         "message": result.get("response"),
     }

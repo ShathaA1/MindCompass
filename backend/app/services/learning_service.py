@@ -585,7 +585,7 @@ def get_initial_topic_status(
 
     # Consider strongly mastered topics completed
     # when building the initial learning path.
-    if mastery_score >= 85:
+    if mastery_score >= 80:
         return "completed"
 
     # Topics below the mastery threshold
@@ -633,8 +633,6 @@ def update_learning_path(
         topic_id=topic_id
     )
 
-    # Update the learning path item status.
-    learning_path_item.status = updated_status
 
     # Determine the learner's next action
     # using the latest assessment mastery score.

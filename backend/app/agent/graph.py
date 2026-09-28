@@ -167,7 +167,7 @@ def load_conversation_history(
         session_id=session_id
     )
 
-    topic_explanation = get_latest_explanation(
+    topic_explanation = get_first_explanation(
             db=db,
             session_id=session_id,
         )
@@ -207,12 +207,12 @@ def get_last_agent_action(
 
     return last_message.agent_action
 
-def get_latest_explanation(
+def get_first_explanation(
     db: Session,
     session_id: int
 ) -> str | None:
     """
-    Return the latest Tutor explanation
+    Return the first Tutor explanation
     stored in the current chat session.
     """
 
@@ -224,7 +224,7 @@ def get_latest_explanation(
             ChatMessage.agent_action == "explain",
         )
         .order_by(
-            ChatMessage.created_at.desc()
+            ChatMessage.created_at.asc()
         )
         .first()
     )
@@ -233,7 +233,6 @@ def get_latest_explanation(
         return None
 
     return message.content
-
 
 #----------------------------------------------------------
 # LangGraph DB wrappers
@@ -675,13 +674,62 @@ def generate_initial_diagnostic_node(
     # Some learning paths may not currently require
     # a prerequisite diagnostic assessment.
     if not diagnostic_topics:
+        # Load and validate the selected learning path.
+        path_config = AVAILABLE_LEARNING_PATHS.get(
+            selected_path
+        )
+
+        if not path_config:
+            return {
+                "response": (
+                    "The selected learning path is not supported."
+                )
+            }
+
+        target_topic_id = path_config.get(
+            "target_topic_id"
+        )
+
+        if target_topic_id is None:
+            return {
+                "response": (
+                    "This learning path is not fully configured yet."
+                )
+            }
+
+        # Create the learning path immediately when
+        # no prerequisite diagnostic is required.
+        learning_path = create_learning_path(
+            db=db,
+            user_id=state["user_id"],
+            target_topic_id=target_topic_id,
+            path_name=f'{path_config["name"]} Learning Path',
+            goal=f'Learn {path_config["name"]}',
+        )
+
+        # Select the first available topic so the learner
+        # can begin the learning path immediately.
+        next_topic = select_next_topic(
+            db=db,
+            learning_path_id=learning_path[
+                "learning_path_id"
+            ],
+        )
+
         return {
             "diagnostic_topics": [],
             "assessment_type": "diagnostic",
             "assessment_questions": [],
+            "learning_path": learning_path,
+            "current_topic": next_topic,
+            "next_topic_id": (
+                next_topic["topic_id"]
+                if next_topic
+                else None
+            ),
             "response": (
                 "No prerequisite diagnostic assessment "
-                "is required for this learning path."
+                "is required. Your learning path is ready."
             ),
         }
 
@@ -697,88 +745,131 @@ def generate_initial_diagnostic_node(
         or "beginner"
     )
 
-    # Map diagnostic topics to the real RAG-backed
-    # learning materials used to generate questions.
-    #
-    # Topic 1 stores Python diagnostic mastery,
-    # while Topic 27 contains the actual Python material.
-    #
-    # Topic 2 stores Machine Learning diagnostic mastery,
-    # while Topic 26 contains the actual ML material.
-    diagnostic_rag_sources = {
-        1: {
-            "topic_id": 27,
-            "topic_name": "Python Reference Material",
-            "retrieval_query": (
-                "Python fundamentals including variables, data types, "
-                "lists, dictionaries, control flow, loops, conditions, "
-                "functions, and basic Python behavior"
-            ),
+    diagnostic_question_distribution = {
+        "machine_learning": {
+            1: 10,
         },
-        2: {
-            "topic_id": 26,
-            "topic_name": "Machine Learning Reference Material",
-            "retrieval_query": (
-                "Machine learning fundamentals including supervised "
-                "and unsupervised learning, classification, regression, "
-                "clustering, features, labels, model training, "
-                "and evaluation"
-            ),
+        "agentic_ai": {
+            1: 5,
+            2: 5,
         },
     }
 
-    # Build RAG context from the real learning materials
-    # while preserving the diagnostic topic identities.
-    context_parts = []
+    # Map each diagnostic topic to the current
+    # RAG-backed curriculum used for question generation.
+    diagnostic_rag_sources = {
+        1: {
+            "topic_ids": list(range(35, 43)),
+            "topic_name": "Python Fundamentals",
+            "retrieval_query": (
+                "Python fundamentals including variables, data types, "
+                "operators, strings, conditions, loops, collections, "
+                "functions, and basic Python programming concepts"
+            ),
+        },
+        2: {
+            "topic_ids": list(range(28, 35)),
+            "topic_name": "Machine Learning Fundamentals",
+            "retrieval_query": (
+                "Machine learning fundamentals including supervised "
+                "learning, unsupervised learning, deep learning, "
+                "reinforcement learning, ensemble learning, "
+                "classification, regression, clustering, model training, "
+                "and evaluation"
+            ),
+        },
+        
+    }
 
+    question_distribution = (
+        diagnostic_question_distribution.get(
+            selected_path,
+            {}
+        )
+    )
+
+    all_questions = []
+
+    # Generate each diagnostic area separately so the
+    # requested question distribution is guaranteed.
     for topic in diagnostic_topics:
         diagnostic_topic_id = topic["topic_id"]
+
+        num_questions = question_distribution.get(
+            diagnostic_topic_id,
+            0
+        )
+
+        # Skip diagnostic areas that are not required
+        # for the selected learning path.
+        if num_questions <= 0:
+            continue
 
         rag_source = diagnostic_rag_sources.get(
             diagnostic_topic_id
         )
 
-        # Skip diagnostic topics that do not have
-        # a configured RAG-backed source.
+        # Skip safely if no RAG source has been configured
+        # for this diagnostic area.
         if not rag_source:
             continue
 
-        topic_context = retrieve_topic_context(
-            topic_id=rag_source["topic_id"],
-            topic_name=rag_source["topic_name"],
-            retrieval_query=rag_source["retrieval_query"]
-        )
+        # Collect relevant learning material from all
+        # curriculum topics belonging to this area.
+        topic_context_parts = []
 
-        if topic_context:
-            context_parts.append(
-                (
-                    f"Diagnostic topic: {topic['topic']}\n"
-                    f"Source material:\n{topic_context}"
-                )
+        for rag_topic_id in rag_source["topic_ids"]:
+            topic_context = retrieve_topic_context(
+                topic_id=rag_topic_id,
+                topic_name=rag_source["topic_name"],
+                retrieval_query=rag_source[
+                    "retrieval_query"
+                ],
             )
 
-    context = "\n\n".join(context_parts)
+            if topic_context:
+                topic_context_parts.append(
+                    topic_context
+                )
 
-    # Generate one diagnostic quiz covering
-    # all required prerequisite topics.
-    quiz_json = generate_quiz.invoke(
-        {
-            "topics": diagnostic_topics,
-            "context": context,
-            "student_level": student_level,
-            "num_questions": 5,
-            "assessment_type": "diagnostic",
-        }
-    )
+        combined_topic_context = "\n\n".join(
+            topic_context_parts
+        )
 
-    # Convert the tool output from JSON text
-    # into Python data.
-    quiz = json.loads(quiz_json)
+        # Do not generate questions without grounded
+        # learning material.
+        if not combined_topic_context:
+            continue
+
+        # Generate only the required number of questions
+        # for this diagnostic knowledge area.
+        quiz_json = generate_quiz.invoke(
+            {
+                "topics": [topic],
+                "context": combined_topic_context,
+                "student_level": student_level,
+                "num_questions": num_questions,
+                "assessment_type": "diagnostic",
+            }
+        )
+
+        quiz = json.loads(
+            quiz_json
+        )
+
+        generated_questions = quiz.get(
+            "questions",
+            []
+        )
+
+        all_questions.extend(
+            generated_questions
+        )
 
     return {
         "diagnostic_topics": diagnostic_topics,
         "assessment_type": "diagnostic",
-        "assessment_questions": quiz["questions"],
+        "assessment_questions": all_questions,
         "response": (
             "Your diagnostic assessment is ready."
         ),

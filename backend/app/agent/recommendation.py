@@ -74,35 +74,66 @@ def build_recommendation(
     # can safely work when no weak areas are available.
     weak_areas = weak_areas or []
 
-    # The learner has not completed an assessment yet.
+    # Explain why the selected next action is appropriate.
     if mastery_score is None:
-        reason = (
-            "No assessment result is available for this topic. "
-            "The learner should start with an explanation."
-        )
+        if recommended_action == "practice":
+            reason = (
+                "The learner has completed the explanation "
+                "and should now reinforce understanding through practice."
+            )
+        elif recommended_action == "assess":
+            reason = (
+                "The learner has completed the explanation and practice "
+                "and is ready for an assessment."
+            )
+        else:
+            reason = (
+                "No assessment result is available for this topic. "
+                "The learner should start with an explanation."
+            )
 
-    # Very low mastery indicates that the learner
-    # needs stronger conceptual understanding.
     elif mastery_score < 40:
-        reason = (
-            f"Mastery is {mastery_score}%. "
-            "The learner needs additional explanation "
-            "before progressing."
-        )
+        if recommended_action == "practice":
+            reason = (
+                f"Mastery is {mastery_score}%. "
+                "The learner has reviewed the explanation and should "
+                "now reinforce understanding through practice."
+            )
+        elif recommended_action == "assess":
+            reason = (
+                f"Mastery is {mastery_score}%. "
+                "The learner has completed additional practice "
+                "and should now be reassessed."
+            )
+        else:
+            reason = (
+                f"Mastery is {mastery_score}%. "
+                "The learner needs additional explanation "
+                "before progressing."
+            )
 
-    # Moderate mastery indicates that the learner
-    # should strengthen understanding through practice.
     elif mastery_score < 70:
-        reason = (
-            f"Mastery is {mastery_score}%. "
-            "The learner understands some of the topic "
-            "but needs additional practice."
-        )
+        if recommended_action == "assess":
+            reason = (
+                f"Mastery is {mastery_score}%. "
+                "The learner has completed additional practice "
+                "and should now be reassessed."
+            )
+        else:
+            reason = (
+                f"Mastery is {mastery_score}%. "
+                "The learner understands some of the topic "
+                "but needs additional practice."
+            )
 
-    # Good mastery indicates that the learner
-    # should review remaining gaps before progressing.
     elif mastery_score < 80:
-        if weak_areas:
+        if recommended_action == "assess":
+            reason = (
+                f"Mastery is {mastery_score}%. "
+                "The learner has completed the review "
+                "and should now be reassessed."
+            )
+        elif weak_areas:
             reason = (
                 f"Mastery is {mastery_score}%. "
                 "The learner should review the identified "
@@ -130,7 +161,7 @@ def build_recommendation(
             f"Mastery is {mastery_score}%. "
             "The learner has demonstrated strong mastery "
             "and is ready for the next learning step."
-    )
+        )
 
     return {
         "recommended_action": recommended_action,
