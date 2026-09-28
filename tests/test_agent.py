@@ -5000,3 +5000,66 @@ def test_select_practice_type_accepts_frontend_labels(
     )
 
     assert result == expected_type
+
+
+def test_practice_uses_existing_topic_explanation(
+    monkeypatch
+):
+    """
+    Test that practice generation uses the existing
+    topic explanation without calling RAG again.
+    """
+
+    # Fail the test if retrieval is called.
+    def fail_if_retrieval_called(
+        topic_id,
+        topic_name,
+        retrieval_query=None,
+    ):
+        raise AssertionError(
+            "RAG retrieval should not be called "
+            "when topic_explanation is available."
+        )
+
+    monkeypatch.setattr(
+        "app.agent.graph.retrieve_topic_context",
+        fail_if_retrieval_called,
+    )
+
+    class FakePracticeTool:
+        def invoke(self, inputs):
+            return {
+                "practice_type": "flashcards",
+                "items": [
+                    {
+                        "prompt": "What is Python?",
+                        "answer": "A programming language.",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(
+        "app.agent.graph.generate_practice",
+        FakePracticeTool(),
+    )
+
+    state = {
+        "user_id": 2,
+        "user_message": "Give me practice.",
+        "topic_explanation": (
+            "Python is a high-level programming language."
+        ),
+        "current_topic": {
+            "topic_id": 35,
+            "name": "Introduction to Python",
+        },
+        "learner_context": {
+            "current_level": "Beginner",
+        },
+        "topic_mastery": {},
+    }
+
+    result = practice_node(state)
+
+    assert result["last_action"] == "practice"
+    assert result["response"]

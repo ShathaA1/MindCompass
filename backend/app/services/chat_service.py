@@ -39,6 +39,7 @@ def get_recent_messages(
         {
             "role": message.role,
             "content": message.content,
+            "agent_action": message.agent_action,
         }
         for message in messages
     ]

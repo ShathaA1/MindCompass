@@ -250,6 +250,104 @@ def render_assessment(
     st.rerun()
 
 
+
+def render_stored_message(message: dict) -> None:
+    """
+    Render a stored Tutor message according to
+    the agent action that originally produced it.
+    """
+
+    role = message.get(
+        "role",
+        "assistant"
+    )
+
+    content = message.get(
+        "content",
+        ""
+    )
+
+    agent_action = message.get(
+        "agent_action"
+    )
+
+    with st.chat_message(role):
+
+        # Render stored practice using the same
+        # structured UI used for new practice.
+        if (
+            role == "assistant"
+            and agent_action == "practice"
+        ):
+            try:
+                practice_data = json.loads(
+                    content
+                )
+            except json.JSONDecodeError:
+                st.markdown(content)
+                return
+
+            practice_type = practice_data.get(
+                "practice_type",
+                "practice"
+            )
+
+            practice_items = practice_data.get(
+                "items",
+                []
+            )
+
+            st.markdown(
+                "### "
+                + practice_type.replace(
+                    "_",
+                    " "
+                ).title()
+            )
+
+            for index, item in enumerate(
+                practice_items,
+                start=1
+            ):
+                prompt = item.get(
+                    "prompt",
+                    ""
+                )
+
+                answer = item.get(
+                    "answer",
+                    ""
+                )
+
+                st.markdown(
+                    f"**{index}. {prompt}**"
+                )
+
+                with st.expander(
+                    "Show answer"
+                ):
+                    st.markdown(
+                        str(answer)
+                    )
+
+            return
+
+        # Show stored assessments as a simple history
+        # message instead of rendering raw quiz JSON.
+        if (
+            role == "assistant"
+            and agent_action == "assess"
+        ):
+            st.markdown(
+                "**Assessment generated for this topic.**"
+            )
+            return
+
+        # Render normal stored messages as Markdown.
+        st.markdown(content)
+
+
+
 def render():
     """Render the main Tutor page."""
 
@@ -501,14 +599,10 @@ def render():
             )
         )
 
-    # Display previous chat messages.
     for message in st.session_state.tutor_messages:
-        with st.chat_message(
-            message["role"]
-        ):
-            st.markdown(
-                message["content"]
-            )
+        render_stored_message(
+            message
+        )
 
     # ---------------------------------------------------------
     # Active assessment

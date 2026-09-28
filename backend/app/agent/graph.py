@@ -159,6 +159,7 @@ def load_conversation_history(
         limit=10
     )
 
+
     # Load the most recent completed agent action
     # from the current chat session.
     last_action = get_last_agent_action(
@@ -166,11 +167,17 @@ def load_conversation_history(
         session_id=session_id
     )
 
+    topic_explanation = get_latest_explanation(
+            db=db,
+            session_id=session_id,
+        )
+
     # Store the recent conversation context
     # and last action in the shared agent state.
     return {
         "conversation_history": conversation_history,
         "last_action": last_action,
+        "topic_explanation": topic_explanation,
     }
 
 
@@ -199,6 +206,33 @@ def get_last_agent_action(
         return None
 
     return last_message.agent_action
+
+def get_latest_explanation(
+    db: Session,
+    session_id: int
+) -> str | None:
+    """
+    Return the latest Tutor explanation
+    stored in the current chat session.
+    """
+
+    message = (
+        db.query(ChatMessage)
+        .filter(
+            ChatMessage.session_id == session_id,
+            ChatMessage.role == "assistant",
+            ChatMessage.agent_action == "explain",
+        )
+        .order_by(
+            ChatMessage.created_at.desc()
+        )
+        .first()
+    )
+
+    if not message:
+        return None
+
+    return message.content
 
 
 #----------------------------------------------------------
@@ -1038,6 +1072,7 @@ def teach_node(
 
     return {
         "response": explanation,
+        "topic_explanation": explanation,
         "last_action": "explain",
         "recommended_action": recommendation[
             "recommended_action"
@@ -1110,15 +1145,17 @@ def generate_assessment_node(
     topic_id = current_topic["topic_id"]
     topic_name = current_topic["name"]
 
-    # Retrieve learning material from the current topic
-    # using the learner's specific assessment request
-    # as the semantic search query.
-    context = retrieve_topic_context(
-        topic_id=topic_id,
-        topic_name=topic_name,
-        retrieval_query=assessment_inputs[
-            "user_message"
-        ]
+    # Use the previously generated topic explanation
+# as the primary context for review generation.
+    context = state.get("topic_explanation")
+
+    # Fall back to topic retrieval only when no
+    # previous explanation is available.
+    if not context:
+        context = retrieve_topic_context(
+            topic_id=assessment_inputs["topic_id"],
+            topic_name=assessment_inputs["topic_name"],
+            retrieval_query=assessment_inputs["user_message"],
     )
 
     # Do not generate questions without grounded
@@ -1618,14 +1655,18 @@ def practice_node(
             )
         }
 
-    # Retrieve learning material from the current topic
-    # using the learner's specific request as the
-    # semantic search query.
-    context = retrieve_topic_context(
-        topic_id=practice_inputs["topic_id"],
-        topic_name=practice_inputs["topic_name"],
-        retrieval_query=practice_inputs["user_message"]
-    )
+    # Use the previously generated topic explanation
+    # as the primary context for practice generation.
+    context = state.get("topic_explanation")
+
+    # Fall back to topic retrieval only when no
+    # previous explanation is available.
+    if not context:
+        context = retrieve_topic_context(
+            topic_id=practice_inputs["topic_id"],
+            topic_name=practice_inputs["topic_name"],
+            retrieval_query=practice_inputs["user_message"],
+        )
 
     if not context:
         return {
@@ -1714,15 +1755,22 @@ def review_node(
             )
         }
 
-    # Retrieve learning material from the current topic
-    # using the learner's specific review request as the
-    # semantic search query.
-    context = retrieve_topic_context(
-        topic_id=review_inputs["topic_id"],
-        topic_name=review_inputs["topic_name"],
-        retrieval_query=review_inputs["user_message"]
+    # Use the previously generated topic explanation
+    # as the primary context for practice generation.
+    context = state.get("topic_explanation")
+
+    # Fall back to topic retrieval only when no
+    # previous explanation is available.
+    if not context:
+        context = retrieve_topic_context(
+            topic_id=review_inputs["topic_id"],
+            topic_name=review_inputs["topic_name"],
+            retrieval_query=review_inputs["user_message"],
     )
 
+
+    # Stop safely when neither a previous explanation
+    # nor retrieved learning context is available.
     if not context:
         return {
             "response": (
