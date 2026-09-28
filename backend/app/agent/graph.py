@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-
+import re
 from app.agent.state import TutorState
 from app.database.connection import SessionLocal
 from app.services.learner_service import get_learner_context
@@ -1661,6 +1661,64 @@ def submit_assessment_node(
             feedback_result
         )
 
+        # Convert structured feedback into readable text
+        # for both the learner response and database record.
+        feedback_lines = []
+
+        summary = feedback.get("summary")
+
+        if summary:
+            feedback_lines.append(summary)
+
+        strengths = feedback.get(
+            "strengths",
+            []
+        )
+
+        if strengths:
+            feedback_lines.append("")
+            feedback_lines.append("Strengths:")
+
+            feedback_lines.extend(
+                f"- {strength}"
+                for strength in strengths
+            )
+
+        feedback_weak_areas = feedback.get(
+            "weak_areas",
+            []
+        )
+
+        if feedback_weak_areas:
+            feedback_lines.append("")
+            feedback_lines.append("Areas to review:")
+
+            feedback_lines.extend(
+                f"- {weak_area}"
+                for weak_area in feedback_weak_areas
+            )
+
+        feedback_recommendation = feedback.get(
+            "recommendation"
+        )
+
+        if feedback_recommendation:
+            feedback_lines.append("")
+            feedback_lines.append("Recommendation:")
+            feedback_lines.append(
+                feedback_recommendation
+            )
+
+        feedback_text = "\n".join(
+            feedback_lines
+        )
+
+        # Save the generated personalized feedback
+        # on the assessment attempt.
+        attempt.feedback = feedback_text
+        db.commit()
+
+
         # Load the learner's active learning path so
         # the current path item can be synchronized
         # with the latest assessment result.
@@ -1730,13 +1788,14 @@ def submit_assessment_node(
             "recommendation_reason"
         ],
         "last_action": "assess",
-        "response": (
+         "response": (
             f"Assessment completed. "
             f"Score: {assessment_result['score']}/"
             f"{assessment_result['max_score']}. "
             f"Mastery: "
-            f"{updated_topic_mastery['mastery_score']:.0f}%. "
-            f"Recommended next step: "
+            f"{updated_topic_mastery['mastery_score']:.0f}%."
+            f"\n\nFeedback:\n{feedback_text}"
+            f"\n\nRecommended next step: "
             f"{recommendation['recommended_action']}."
         ),
     }
@@ -1815,6 +1874,71 @@ def select_practice_type(
 
     return "scenario"
 
+def extract_practice_item_count(
+    user_message: str,
+    default: int = 5,
+    maximum: int = 10,
+) -> int:
+    """
+    Extract the requested number of practice items.
+
+    Use the default when the learner does not specify a number,
+    and limit large requests to avoid excessive generation.
+    """
+
+    if not user_message:
+        return default
+
+    normalized_message = user_message.strip().lower()
+
+    number_words = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+    }
+
+    item_names = (
+        r"questions?|items?|exercises?|problems?|"
+        r"flashcards?|scenarios?"
+    )
+
+    # Match numeric requests such as:
+    # "3 questions" or "2 short practice questions".
+    numeric_match = re.search(
+        rf"\b(\d+)\s+(?:[a-z-]+\s+){{0,3}}(?:{item_names})\b",
+        normalized_message,
+    )
+
+    if numeric_match:
+        requested_count = int(numeric_match.group(1))
+
+        if requested_count < 1:
+            return default
+
+        return min(requested_count, maximum)
+
+    # Match word-based requests such as:
+    # "one question" or "three short practice questions".
+    word_pattern = "|".join(number_words)
+
+    word_match = re.search(
+        rf"\b({word_pattern})\s+"
+        rf"(?:[a-z-]+\s+){{0,3}}(?:{item_names})\b",
+        normalized_message,
+    )
+
+    if word_match:
+        requested_count = number_words[word_match.group(1)]
+        return min(requested_count, maximum)
+
+    return default
 
 def practice_node(
     state: TutorState
@@ -1835,14 +1959,36 @@ def practice_node(
                 "because no current topic is available."
             )
         }
+    # Use identified weak areas to retrieve targeted
+    # learning context for personalized practice.
+    weak_area_names = normalize_weak_areas(
+        practice_inputs.get("weak_areas")
+    )
 
-    # Use the previously generated topic explanation
-    # as the primary context for practice generation.
     context = state.get("topic_explanation")
 
-    # Fall back to topic retrieval only when no
-    # previous explanation is available.
-    if not context:
+    if weak_area_names:
+        retrieval_query = (
+            f'{practice_inputs["topic_name"]}. '
+            f'Learner request: '
+            f'{practice_inputs.get("user_message", "")}. '
+            f'Focus practice on these weak areas: '
+            f'{", ".join(weak_area_names)}.'
+        )
+
+        targeted_context = retrieve_topic_context(
+            topic_id=practice_inputs["topic_id"],
+            topic_name=practice_inputs["topic_name"],
+            retrieval_query=retrieval_query,
+        )
+
+        # Prefer context retrieved specifically for the
+        # weak areas, while retaining a safe fallback.
+        context = targeted_context or context
+
+    # When no weak areas are available, use the learner's
+    # current request for general topic retrieval.
+    elif not context:
         context = retrieve_topic_context(
             topic_id=practice_inputs["topic_id"],
             topic_name=practice_inputs["topic_name"],
@@ -1889,6 +2035,9 @@ def practice_node(
             "preferred_format"
         ),
     )
+    num_items = extract_practice_item_count(
+        practice_inputs["user_message"]
+    )
     # Generate personalized practice using the retrieved
     # course material, learner mastery, weak areas,
     # level, and profile preferences.
@@ -1899,7 +2048,7 @@ def practice_node(
             "student_level"
         ],
         "practice_type": practice_type,
-        "num_items": 5,
+        "num_items": num_items,
         "weak_areas": json.dumps(
             practice_inputs["weak_areas"]
         ),
@@ -2011,6 +2160,109 @@ def review_node(
         "response": review,
         "last_action": "review",
     }
+
+def recommend_action_node(
+    state: TutorState
+) -> dict:
+    """
+    Display the recommended learning action and its reason
+    without executing the action or updating the learning path.
+    """
+
+    suggested_action = state.get(
+        "suggested_action",
+        "explain"
+    )
+
+    recommendation_reason = state.get(
+        "recommendation_reason",
+        ""
+    )
+
+    topic_mastery = state.get(
+        "topic_mastery",
+        {}
+    )
+
+    weak_areas = topic_mastery.get(
+        "weak_areas",
+        []
+    )
+
+    action_labels = {
+        "explain": "Review the explanation",
+        "practice": "Practice",
+        "assess": "Take an assessment",
+        "review": "Review the topic",
+        "recommend": "Continue to the next topic",
+    }
+
+    action_label = action_labels.get(
+        suggested_action,
+        suggested_action.replace("_", " ").title()
+    )
+
+    response_parts = [
+        f"Recommended next action: **{action_label}**."
+    ]
+
+    if recommendation_reason:
+        response_parts.append(
+            f"Why: {recommendation_reason}"
+        )
+
+    normalized_weak_areas = []
+
+    for weak_area in weak_areas:
+        if isinstance(weak_area, dict):
+            area_name = weak_area.get("area")
+
+            if area_name:
+                normalized_weak_areas.append(area_name)
+
+        elif weak_area:
+            normalized_weak_areas.append(
+                str(weak_area)
+            )
+
+    if normalized_weak_areas:
+        response_parts.append(
+            "Areas to focus on:\n"
+            + "\n".join(
+                f"- {area}"
+                for area in normalized_weak_areas
+            )
+        )
+    confirmation_messages = {
+        "explain": (
+            "Would you like me to explain the topic?"
+        ),
+        "practice": (
+            "Would you like me to start the practice activity?"
+        ),
+        "assess": (
+            "Would you like me to start the assessment?"
+        ),
+        "review": (
+            "Would you like me to start the review?"
+        ),
+        "recommend": (
+            "Would you like to continue to the next topic?"
+        ),
+    }
+
+    response_parts.append(
+        confirmation_messages.get(
+            suggested_action,
+            "Would you like me to start this activity?"
+        )
+    )
+
+    return {
+        "response": "\n\n".join(response_parts),
+        "last_action": "recommend",
+    }
+
 
 
 #----------------------------------------------------------
@@ -2322,7 +2574,12 @@ def build_tutor_graph():
         "review",
         review_node
     )
-
+    # Add a node that displays a recommendation
+    # without executing or changing the learning path.
+    workflow.add_node(
+        "recommend_action",
+        recommend_action_node
+    )
     # Add the recommendation action node
     # to the Tutor Agent workflow.
     workflow.add_node(
@@ -2408,6 +2665,7 @@ def build_tutor_graph():
             "assess": "assessment_router",
             "practice": "practice",
             "review": "review",
+            "recommend_action": "recommend_action",
             "recommend": "update_learning_path",
         }
     )
@@ -2459,7 +2717,10 @@ def build_tutor_graph():
         "review",
         END
     )
-
+    workflow.add_edge(
+    "recommend_action",
+    END
+    )
     workflow.add_edge(
         "recommend",
         END

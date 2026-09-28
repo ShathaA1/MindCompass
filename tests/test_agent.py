@@ -9,6 +9,7 @@ from app.agent.graph import (
     build_tutor_graph,
     update_learning_path_node,
     recommend_node,
+    recommend_action_node,
     load_conversation_history,
     prepare_assessment_inputs,
     generate_assessment_node,
@@ -23,6 +24,7 @@ from app.agent.graph import (
     submit_initial_diagnostic_node,
     route_tutor_entry,
     select_practice_type,
+    extract_practice_item_count,
     prepare_personalized_inputs,
 )
 from app.agent.planning import (
@@ -628,21 +630,19 @@ def test_resolve_action_explicit_review():
 
 def test_resolve_action_recommendation():
     """
-    Test that the mastery-based recommendation
-    is used when the learner asks what to do next.
+    Asking for a recommendation should preserve the
+    suggested action without executing it immediately.
     """
 
-    # Simulate a learner asking for a recommendation
     state = {
         "learner_need": "recommend",
         "recommended_action": "practice",
     }
 
-    # Resolve the final agent action
     result = resolve_action(state)
 
-    # The mastery-based recommendation should be used
-    assert result["recommended_action"] == "practice"
+    assert result["recommended_action"] == "recommend"
+    assert result["suggested_action"] == "practice"
 
 
 def test_resolve_action_default():
@@ -1012,6 +1012,22 @@ def test_route_recommended_action_to_recommend():
     # to the recommendation node.
     assert result == "recommend"
 
+def test_route_recommendation_request_to_display_node():
+    """
+    A recommendation question should route to the
+    display-only recommendation node.
+    """
+
+    state = {
+        "learner_need": "recommend",
+        "recommended_action": "recommend",
+        "suggested_action": "practice",
+    }
+
+    result = route_recommended_action(state)
+
+    assert result == "recommend_action"
+
 
 def test_tutor_graph_routes_high_mastery_to_recommend():
     """
@@ -1356,6 +1372,47 @@ def test_update_learning_path_node_after_high_mastery():
             )
 
             db.commit()
+
+def test_recommend_action_node_displays_reason_without_execution():
+    """
+    The recommendation display node should explain the
+    suggested action without generating practice or
+    updating the learning path.
+    """
+
+    state = {
+        "suggested_action": "practice",
+        "recommendation_reason": (
+            "Mastery is 60%. The learner understands "
+            "some of the topic but needs additional practice."
+        ),
+        "topic_mastery": {
+            "mastery_score": 60,
+            "weak_areas": [
+                {
+                    "area": "Using the break statement",
+                    "reason": "Incorrect break condition.",
+                },
+                {
+                    "area": "Calculating an average",
+                    "reason": "Incorrect average calculation.",
+                },
+            ],
+        },
+    }
+
+    result = recommend_action_node(state)
+
+    assert "Recommended next action" in result["response"]
+    assert "Practice" in result["response"]
+    assert "Mastery is 60%" in result["response"]
+    assert "Using the break statement" in result["response"]
+    assert "Calculating an average" in result["response"]
+    assert "Would you like me to start" in result["response"]
+    assert result["last_action"] == "recommend"
+
+    assert "current_topic" not in result
+    assert "next_topic_id" not in result
 
 
 def test_recommend_node_selects_next_topic():
@@ -2930,13 +2987,19 @@ def test_practice_node_generates_personalized_practice(
         retrieved_query["topic_name"]
         == "Building Your First Agent"
     )
+    # Verify that the learner's request and identified
+    # weak areas are included in the retrieval query.
+    retrieval_query = retrieved_query[
+        "retrieval_query"
+    ]
 
-    # Verify that the learner's actual request
-    # is used as the semantic retrieval query.
     assert (
-        retrieved_query["retrieval_query"]
-        == "Give me practice questions about tool selection."
+        "Give me practice questions about tool selection."
+        in retrieval_query
     )
+
+    assert "Tool selection" in retrieval_query
+    assert "Tool arguments" in retrieval_query
 
     # Verify the final practice response.
     assert result["response"] == (
@@ -4631,11 +4694,13 @@ def test_submit_assessment_node_generates_personalized_feedback(
         assessment_attempt_id = 100
         score = 0
         max_score = 1
+        feedback = None
+    fake_attempt = FakeAssessmentAttempt()
 
     monkeypatch.setattr(
         "app.agent.graph.save_assessment_result",
         lambda db, user_id, topic_id,
-        assessment_type, questions: FakeAssessmentAttempt()
+        assessment_type, questions: fake_attempt
     )
 
     updated_mastery = {
@@ -4716,6 +4781,35 @@ def test_submit_assessment_node_generates_personalized_feedback(
     assert (
         result["assessment_feedback"]["recommendation"]
         == "Review the core concept."
+    )
+    assert (
+        "The learner needs more review."
+        in result["response"]
+    )
+
+    assert (
+        "Areas to review:"
+        in result["response"]
+    )
+
+    assert (
+        "Agent definition"
+        in result["response"]
+    )
+
+    assert (
+        "Review the core concept."
+        in result["response"]
+    )
+
+    assert (
+        fake_attempt.feedback
+        is not None
+    )
+
+    assert (
+        "Agent definition"
+        in fake_attempt.feedback
     )
 
 
@@ -4813,7 +4907,6 @@ def test_teach_node_uses_conversation_history(
         result["response"]
         == "Personalized explanation."
     )
-
 
 def test_practice_node_uses_conversation_history(
     monkeypatch
@@ -5146,3 +5239,54 @@ def test_practice_uses_existing_topic_explanation(
 
     assert result["last_action"] == "practice"
     assert result["response"]
+
+def test_extract_practice_item_count_from_word():
+    """
+    A number written as a word should determine
+    the requested number of practice items.
+    """
+
+    result = extract_practice_item_count(
+        "Give me one short practice question about this topic."
+    )
+
+    assert result == 1
+
+
+def test_extract_practice_item_count_from_digit():
+    """
+    A numeric quantity should determine
+    the requested number of practice items.
+    """
+
+    result = extract_practice_item_count(
+        "Give me 3 practice questions."
+    )
+
+    assert result == 3
+
+
+def test_extract_practice_item_count_uses_default():
+    """
+    Practice requests without a quantity
+    should use the default number of items.
+    """
+
+    result = extract_practice_item_count(
+        "Give me some practice about this topic."
+    )
+
+    assert result == 5
+
+
+def test_extract_practice_item_count_limits_large_request():
+    """
+    Large practice requests should be limited
+    to prevent excessive generation.
+    """
+
+    result = extract_practice_item_count(
+        "Give me 50 practice questions."
+    )
+
+    assert result == 10

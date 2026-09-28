@@ -171,29 +171,24 @@ def recommend_next_action(
     # in the shared TutorState.
     return recommendation
 
-
 def resolve_action(
     state: TutorState
 ) -> dict:
     """
-    Resolve the final agent action by combining
-    the learner's explicit request with the recommendation.
+    Resolve the final agent action while separating
+    recommendation requests from action execution.
     """
 
     # Read the learner's requested action.
-    learner_need = state.get(
-        "learner_need",
-        "recommend"
-    )
+    learner_need = state.get("learner_need")
 
-    # Read the action recommended from mastery data.
-    recommended_action = state.get(
+    # Preserve the action selected from mastery data.
+    suggested_action = state.get(
         "recommended_action",
         "explain"
     )
 
-    # If the learner explicitly asked for an action,
-    # respect the learner's request.
+    # Explicit execution requests should run immediately.
     if learner_need in [
         "explain",
         "assess",
@@ -202,14 +197,19 @@ def resolve_action(
     ]:
         final_action = learner_need
 
-    # If the learner asked for a recommendation,
-    # use the action selected from mastery data.
-    else:
-        final_action = recommended_action
+    # A recommendation request should display the
+    # suggested action and reason without executing it.
+    elif learner_need == "recommend":
+        final_action = "recommend"
 
-    # Store the final decision in TutorState.
+    # Preserve the mastery-based recommendation when
+    # no explicit learner intent is available.
+    else:
+        final_action = suggested_action
+
     return {
-        "recommended_action": final_action
+        "recommended_action": final_action,
+        "suggested_action": suggested_action,
     }
 
 
@@ -217,19 +217,21 @@ def route_recommended_action(
     state: TutorState
 ) -> str:
     """
-    Route the workflow based on the final
-    recommended action stored in TutorState.
+    Route recommendation questions separately from
+    requests that execute a learning action.
     """
 
-    # Read the final action selected after
-    # learner intent and mastery are resolved.
+    learner_need = state.get("learner_need")
+
+    # Display the recommendation without executing it.
+    if learner_need == "recommend":
+        return "recommend_action"
+
     recommended_action = state.get(
         "recommended_action",
         "explain"
     )
 
-    # Map each supported action to its
-    # corresponding LangGraph node.
     action_routes = {
         "explain": "teach",
         "assess": "assess",
@@ -238,8 +240,6 @@ def route_recommended_action(
         "recommend": "recommend",
     }
 
-    # Use teaching as a safe fallback
-    # when the action is unknown.
     return action_routes.get(
         recommended_action,
         "teach"
