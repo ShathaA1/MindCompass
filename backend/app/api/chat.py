@@ -31,15 +31,15 @@ def start_chat_session(
     db: Session = Depends(get_db),
 ):
     """
-    Create a new Tutor chat session for
-    the authenticated learner.
+    Create a new Tutor chat session and automatically
+    generate the first explanation for a topic session.
     """
 
     # Get the authenticated learner ID
     # from the access token.
     user_id = int(current_user["sub"])
 
-    # Create and persist a new chat session.
+    # Create and persist the new topic session.
     session = create_chat_session(
         db=db,
         user_id=user_id,
@@ -48,16 +48,75 @@ def start_chat_session(
         topic_id=data.topic_id,
     )
 
-    # Return the information needed by the
-    # frontend to continue the conversation.
+    initial_response = None
+    recommended_action = None
+
+    # Automatically start learning when this is
+    # a topic-based Tutor session.
+    if data.topic_id is not None:
+        graph = build_tutor_graph()
+
+        initial_state = {
+            "user_id": user_id,
+            "session_id": session.chat_session_id,
+
+            # This is an internal instruction used only
+            # to start the Tutor workflow. It is not saved
+            # as a learner message in conversation history.
+            "user_message": (
+                "Explain the current topic clearly "
+                "and introduce its main concepts."
+            ),
+        }
+
+        try:
+            result = graph.invoke(
+                initial_state
+            )
+
+            initial_response = result.get(
+                "response"
+            )
+
+            recommended_action = result.get(
+                "recommended_action"
+            )
+
+            agent_action = result.get(
+                "last_action"
+            )
+
+            # Save only the Tutor explanation.
+            # No artificial learner message is stored.
+            if (
+                initial_response
+                and agent_action == "explain"
+            ):
+                save_chat_message(
+                    db=db,
+                    session_id=session.chat_session_id,
+                    role="assistant",
+                    content=initial_response,
+                    agent_action="explain",
+                )
+
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=str(exc),
+            ) from exc
+
+    # Return the session together with the
+    # automatically generated first explanation.
     return {
         "session_id": session.chat_session_id,
         "session_name": session.session_name,
         "learning_path_id": session.learning_path_id,
         "topic_id": session.topic_id,
         "started_at": session.started_at,
+        "initial_response": initial_response,
+        "recommended_action": recommended_action,
     }
-
 
 @router.get("/sessions")
 def get_chat_sessions(
