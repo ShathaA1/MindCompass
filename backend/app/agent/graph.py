@@ -1146,7 +1146,7 @@ def generate_assessment_node(
     topic_name = current_topic["name"]
 
     # Use the previously generated topic explanation
-# as the primary context for review generation.
+    # as the primary context for review generation.
     context = state.get("topic_explanation")
 
     # Fall back to topic retrieval only when no
@@ -1943,7 +1943,11 @@ def recommend_node(
     return {
         "current_topic": next_topic,
         "next_topic_id": next_topic["topic_id"],
-        "response": " ".join(response_parts),
+        "response": (
+            f"Great job! You have completed this topic. "
+            f"You are ready to continue to "
+            f"{next_topic['name']}."
+        ),
     }
 
 

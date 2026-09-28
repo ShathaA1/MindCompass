@@ -166,7 +166,9 @@ def submit_diagnostic(
 
 def create_chat_session(
     token,
-    session_name="Tutor Session"
+    session_name="Tutor Session",
+    learning_path_id=None,
+    topic_id=None,
 ):
     """
     Create a new Tutor chat session for
@@ -178,9 +180,14 @@ def create_chat_session(
         headers=_headers(token),
         json={
             "session_name": session_name,
+            "learning_path_id": learning_path_id,
+            "topic_id": topic_id,
         },
         timeout=REQUEST_TIMEOUT,
     )
+
+
+
 def get_chat_sessions(token):
     """
     Get chat sessions belonging to

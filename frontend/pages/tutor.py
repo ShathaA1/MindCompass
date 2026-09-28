@@ -135,6 +135,10 @@ def render_assessment(
 
     result = response.json()
 
+    recommended_action = result.get(
+        "recommended_action"
+    )
+
     # Load structured personalized feedback returned
     # by the Tutor Agent after assessment submission.
     assessment_feedback = result.get(
@@ -247,7 +251,53 @@ def render_assessment(
         complete_feedback
     )
 
+    # When the learner has mastered the current topic,
+    # allow them to move to the next topic explicitly.
+    if recommended_action == "recommend":
+        st.info(
+            "You have mastered this topic and are ready "
+            "to continue to the next topic."
+        )
+
+        if st.button(
+            "Continue to Next Topic",
+            type="primary",
+            key="assessment_continue_next_topic",
+        ):
+            st.session_state.pop(
+                "chat_session_id",
+                None
+            )
+
+            st.session_state.pop(
+                "chat_session_topic_id",
+                None
+            )
+
+            st.session_state.pop(
+                "tutor_messages",
+                None
+            )
+
+            st.session_state.pop(
+                "latest_recommended_action",
+                None
+            )
+
+            st.session_state.pop(
+                "pending_next_topic_id",
+                None
+            )
+
+            st.rerun()
+
+        return
+
+    # For explanation, practice, review, or reassessment,
+    # return to the normal Tutor conversation so the
+    # learner can continue typing.
     st.rerun()
+
 
 
 
@@ -495,75 +545,156 @@ def render():
             recommendation_placeholder.markdown(
                 f"**{recommended_action_text}**"
             )
-    
+
+    # Check whether the learner explicitly opened
+    # a previous topic conversation.
+    selected_session_id = st.session_state.get(
+        "selected_conversation_session_id"
+    )
+
+    selected_topic_id = st.session_state.get(
+        "selected_conversation_topic_id"
+    )
+
+
     # ---------------------------------------------------------
     # Chat session initialization
     # ---------------------------------------------------------
 
-    if "chat_session_id" not in st.session_state:
-
-        try:
-            sessions_response = get_chat_sessions(
-                token
-            )
-
-        except Exception as exc:
-            st.error(
-                f"Could not connect to the Tutor API: {exc}"
-            )
-            return
-
-        if sessions_response.status_code != 200:
-            st.error(
-                "Could not load Tutor sessions."
-            )
-            st.write(
-                sessions_response.text
-            )
-            return
-
-        sessions = sessions_response.json().get(
-            "sessions",
-            [],
+    # Load all Tutor chat sessions so they can be used
+    # for both topic selection and conversation navigation.
+    try:
+        sessions_response = get_chat_sessions(
+            token
         )
 
-        if sessions:
-            # Continue the learner's latest session.
-            st.session_state.chat_session_id = (
-                sessions[0]["session_id"]
+    except Exception as exc:
+        st.error(
+            f"Could not connect to the Tutor API: {exc}"
+        )
+        return
+
+    if sessions_response.status_code != 200:
+        st.error(
+            "Could not load Tutor sessions."
+        )
+        st.write(
+            sessions_response.text
+        )
+        return
+
+    sessions = sessions_response.json().get(
+        "sessions",
+        [],
+    )
+
+
+    if selected_session_id:
+        # Keep the explicitly selected historical
+        # conversation open across Streamlit reruns.
+        st.session_state.chat_session_id = (
+            selected_session_id
+        )
+
+        st.session_state.chat_session_topic_id = (
+            selected_topic_id
+        )
+
+    else:
+        if (
+            "chat_session_id" not in st.session_state
+            or st.session_state.get(
+                "chat_session_topic_id"
+            ) != current_topic_id
+        ):
+            # Clear frontend state that belongs
+            # to the previously opened topic.
+            st.session_state.pop(
+                "tutor_messages",
+                None
             )
 
-        else:
-            try:
-                response = create_chat_session(
-                    token=token,
-                    session_name="Tutor Session",
-                )
-
-            except Exception as exc:
-                st.error(
-                    f"Could not connect to the Tutor API: {exc}"
-                )
-                return
-
-            if response.status_code != 200:
-                st.error(
-                    "Could not start a Tutor session."
-                )
-                st.write(
-                    response.text
-                )
-                return
-
-            session_data = response.json()
-
-            st.session_state.chat_session_id = (
-                session_data["session_id"]
+            st.session_state.pop(
+                "active_assessment",
+                None
             )
+
+            st.session_state.pop(
+                "latest_recommended_action",
+                None
+            )
+
+            # Find an existing session that belongs
+            # specifically to the current topic.
+            topic_session = next(
+                (
+                    session
+                    for session in sessions
+                    if session.get("topic_id")
+                    == current_topic_id
+                ),
+                None,
+            )
+
+            if topic_session:
+                # Continue the existing conversation
+                # for the current topic.
+                st.session_state.chat_session_id = (
+                    topic_session["session_id"]
+                )
+
+            else:
+                try:
+                    # Create a new conversation for the
+                    # current topic when none exists yet.
+                    response = create_chat_session(
+                        token=token,
+                        session_name=current_topic_name,
+                        learning_path_id=dashboard_data[
+                            "learning_path"
+                        ]["learning_path_id"],
+                        topic_id=current_topic_id,
+                    )
+
+                except Exception as exc:
+                    st.error(
+                        f"Could not connect to the Tutor API: {exc}"
+                    )
+                    return
+
+                if response.status_code != 200:
+                    st.error(
+                        "Could not start a Tutor session."
+                    )
+                    st.write(
+                        response.text
+                    )
+                    return
+
+                session_data = response.json()
+
+                st.session_state.chat_session_id = (
+                    session_data["session_id"]
+                )
+
+                # Add the new session to the local list
+                # so it is available during this render.
+                sessions.insert(
+                    0,
+                    session_data
+                )
+
+            # Remember which topic owns the
+            # currently opened chat session.
+            st.session_state[
+                "chat_session_topic_id"
+            ] = current_topic_id
+
 
     session_id = (
         st.session_state.chat_session_id
     )
+
 
     # ---------------------------------------------------------
     # Stored chat history
@@ -673,6 +804,17 @@ def render():
     result = response.json()
 
     tutor_response = result["response"]
+
+
+    next_topic_id = result.get(
+        "next_topic_id"
+    )
+
+    if next_topic_id:
+        st.session_state[
+            "pending_next_topic_id"
+        ] = next_topic_id
+
 
     agent_action = result.get(
         "agent_action"
@@ -832,3 +974,49 @@ def render():
         st.markdown(
             tutor_response
         )
+
+    # Show a clear transition button when the learner
+    # is ready to move to the next topic.
+    if st.session_state.get(
+        "pending_next_topic_id"
+    ):
+        if st.button(
+            "Continue to Next Topic",
+            type="primary",
+            key="continue_next_topic",
+        ):
+            # Clear the current topic session so the
+            # next rerun loads the new topic session.
+            st.session_state.pop(
+                "chat_session_id",
+                None
+            )
+
+            st.session_state.pop(
+                "chat_session_topic_id",
+                None
+            )
+
+            st.session_state.pop(
+                "tutor_messages",
+                None
+            )
+
+            st.session_state.pop(
+                "latest_recommended_action",
+                None
+            )
+
+            st.session_state.pop(
+                "active_assessment",
+                None
+            )
+
+            st.session_state.pop(
+                "pending_next_topic_id",
+                None
+            )
+
+            st.rerun()
+
+

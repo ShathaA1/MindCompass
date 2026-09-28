@@ -1579,8 +1579,8 @@ def test_recommend_node_builds_personalized_response(monkeypatch):
     assert result["current_topic"] == next_topic
 
     assert "Building Your First Agent" in result["response"]
-    assert "Mastery is 90%" in result["response"]
-    assert "Learn Agentic AI" in result["response"]
+    assert "completed this topic" in result["response"]
+    assert "ready to continue" in result["response"]
 
 
 def test_recommend_node_completes_path_when_no_topic_remains(

@@ -14,6 +14,9 @@ class ChatSessionCreate(BaseModel):
         max_length=255,
     )
 
+    learning_path_id: int | None = None
+    topic_id: int | None = None
+
 
 class ChatMessageRequest(BaseModel):
     """Request data for sending a message to the Tutor Agent."""

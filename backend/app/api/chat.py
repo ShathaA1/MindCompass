@@ -44,6 +44,8 @@ def start_chat_session(
         db=db,
         user_id=user_id,
         session_name=data.session_name,
+        learning_path_id=data.learning_path_id,
+        topic_id=data.topic_id,
     )
 
     # Return the information needed by the
@@ -51,6 +53,8 @@ def start_chat_session(
     return {
         "session_id": session.chat_session_id,
         "session_name": session.session_name,
+        "learning_path_id": session.learning_path_id,
+        "topic_id": session.topic_id,
         "started_at": session.started_at,
     }
 
@@ -83,6 +87,8 @@ def get_chat_sessions(
             {
                 "session_id": session.chat_session_id,
                 "session_name": session.session_name,
+                "learning_path_id": session.learning_path_id,
+                "topic_id": session.topic_id,
                 "started_at": session.started_at,
                 "ended_at": session.ended_at,
             }
@@ -263,6 +269,9 @@ def send_chat_message(
         "response": response,
         "agent_action": agent_action,
         "recommended_action": recommended_action,
+        "next_topic_id": result.get(
+            "next_topic_id"
+        ),
         "assessment_questions": assessment_questions,
         "assessment_type": result.get(
             "assessment_type"
