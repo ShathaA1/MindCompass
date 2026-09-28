@@ -1,40 +1,59 @@
 def determine_recommended_action(
-    mastery_score: float | None
+    mastery_score: float | None,
+    last_action: str | None = None,
 ) -> str:
     """
-    Determine the recommended learning action
-    from the learner's latest mastery score.
-
-    This function provides a single source of truth
-    for recommendation rules across the system.
+    Determine the learner's next recommended action
+    using mastery and the previously completed action.
     """
 
-    # If the learner has not completed an assessment yet,
-    # start by explaining the topic.
+    # Before the first assessment, guide the learner
+    # through explain -> practice -> assess.
     if mastery_score is None:
+        if last_action == "explain":
+            return "practice"
+
+        if last_action == "practice":
+            return "assess"
+
         return "explain"
 
-    # Very low mastery requires explanation.
+    # Very low mastery requires stronger support.
     if mastery_score < 40:
+        if last_action == "explain":
+            return "practice"
+
+        if last_action == "practice":
+            return "assess"
+
         return "explain"
 
-    # Moderate mastery requires additional practice.
+    # Moderate mastery should alternate between
+    # practice and reassessment.
     if mastery_score < 70:
+        if last_action == "practice":
+            return "assess"
+
         return "practice"
 
-    # Good mastery requires review before progressing.
+    # Good mastery should alternate between
+    # focused review and reassessment.
     if mastery_score < 85:
+        if last_action == "review":
+            return "assess"
+
         return "review"
 
     # High mastery means the learner is ready
-    # for the next learning step.
+    # to continue to the next topic.
     return "recommend"
 
 
 
 def build_recommendation(
     mastery_score: float | None,
-    weak_areas: list | None = None
+    weak_areas: list | None = None,
+    last_action: str | None = None,
 ) -> dict:
     """
     Build a detailed recommendation using the learner's
@@ -47,7 +66,8 @@ def build_recommendation(
     # Reuse the shared recommendation rules
     # to determine the learner's next action.
     recommended_action = determine_recommended_action(
-        mastery_score=mastery_score
+        mastery_score=mastery_score,
+        last_action=last_action,
     )
 
     # Normalize weak areas so the recommendation logic

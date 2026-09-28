@@ -225,11 +225,12 @@ def discover_lessons(source_root: Path) -> list[dict]:
 
 
 def seed_topics(session: Session, source_root: Path) -> list[Topic]:
-    """Insert or update one Topic per lesson; idempotent across re-runs.
+    """
+    Insert or update one Topic per lesson; idempotent across re-runs.
 
-    Chains each lesson to the previous lesson *in the same course AND
-    chapter* via `topic_prerequisites` (so chapter "1" in one course
-    doesn't get chained to chapter "1" of a different course).
+    Chain each learning topic to the previous topic
+    within the same course so the curriculum continues
+    across chapter boundaries.
     """
 
     lessons = discover_lessons(source_root)
@@ -238,7 +239,14 @@ def seed_topics(session: Session, source_root: Path) -> list[Topic]:
 
     all_topics: list[Topic] = []
     folder_map_entries: list[dict] = []
-    previous_topic_by_course_chapter: dict[tuple[str, int], Topic] = {}
+    # Track the previous topic in each course so
+    # sequencing continues across chapter boundaries.
+    
+    previous_topic_by_course: dict[
+        str,
+        Topic
+    ] = {}
+
 
     for lesson in lessons:
         topic = existing_topics_by_name.get(lesson["name"])
@@ -257,8 +265,15 @@ def seed_topics(session: Session, source_root: Path) -> list[Topic]:
             topic.description = lesson["description"]
             topic.learning_objectives = lesson["learning_objectives"]
 
-        key = (lesson["course_name"], lesson["chapter_number"])
-        previous_topic = previous_topic_by_course_chapter.get(key)
+        # Use the course name as the sequencing key.
+        # This allows topic prerequisites to continue
+        # from one chapter to the next.
+        course_name = lesson["course_name"]
+
+        previous_topic = previous_topic_by_course.get(
+            course_name
+        )
+
         if previous_topic is not None:
             already_linked = (
                 session.query(TopicPrerequisite)
@@ -268,6 +283,7 @@ def seed_topics(session: Session, source_root: Path) -> list[Topic]:
                 )
                 .first()
             )
+
             if already_linked is None:
                 session.add(
                     TopicPrerequisite(
@@ -275,7 +291,10 @@ def seed_topics(session: Session, source_root: Path) -> list[Topic]:
                         prerequisite_topic_id=previous_topic.topic_id,
                     )
                 )
-        previous_topic_by_course_chapter[key] = topic
+
+        previous_topic_by_course[
+            course_name
+        ] = topic
 
         all_topics.append(topic)
         folder_map_entries.append(

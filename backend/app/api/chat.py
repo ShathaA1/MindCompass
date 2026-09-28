@@ -215,8 +215,24 @@ def send_chat_message(
             ),
         )
 
-    # Read the final action selected by the agent.
-    agent_action = result.get(
+    # Detect assessment generation separately because
+    # generating a quiz does not count as a completed
+    # assessment action yet.
+    assessment_questions = result.get(
+        "assessment_questions",
+        []
+    )
+
+    if assessment_questions:
+        agent_action = "assess"
+    else:
+        agent_action = result.get(
+            "last_action"
+        )
+
+    # Read the next action recommended
+    # for the learner after this interaction.
+    recommended_action = result.get(
         "recommended_action"
     )
 
@@ -246,10 +262,8 @@ def send_chat_message(
         "session_id": session_id,
         "response": response,
         "agent_action": agent_action,
-        "assessment_questions": result.get(
-            "assessment_questions",
-            [],
-        ),
+        "recommended_action": recommended_action,
+        "assessment_questions": assessment_questions,
         "assessment_type": result.get(
             "assessment_type"
         ),

@@ -25,6 +25,8 @@ from app.agent.planning import (
 
 from app.agent.recommendation import build_recommendation
 
+from app.database.models import ChatMessage
+
 from app.services.chat_service import get_recent_messages
 from app.services.assessment_service import save_assessment_result
 
@@ -142,10 +144,11 @@ def load_conversation_history(
     session_id = state.get("session_id")
 
     # If no session is available, return
-    # an empty conversation history.
+    # empty conversation state values.
     if not session_id:
         return {
-            "conversation_history": []
+            "conversation_history": [],
+            "last_action": None,
         }
 
     # Load the most recent messages
@@ -156,11 +159,47 @@ def load_conversation_history(
         limit=10
     )
 
+    # Load the most recent completed agent action
+    # from the current chat session.
+    last_action = get_last_agent_action(
+        db=db,
+        session_id=session_id
+    )
+
     # Store the recent conversation context
-    # in the shared agent state.
+    # and last action in the shared agent state.
     return {
-        "conversation_history": conversation_history
+        "conversation_history": conversation_history,
+        "last_action": last_action,
     }
+
+
+def get_last_agent_action(
+    db: Session,
+    session_id: int
+) -> str | None:
+    """
+    Return the most recent agent action
+    recorded in the current chat session.
+    """
+
+    last_message = (
+        db.query(ChatMessage)
+        .filter(
+            ChatMessage.session_id == session_id,
+            ChatMessage.agent_action.isnot(None)
+        )
+        .order_by(
+            ChatMessage.created_at.desc()
+        )
+        .first()
+    )
+
+    if not last_message:
+        return None
+
+    return last_message.agent_action
+
 
 #----------------------------------------------------------
 # LangGraph DB wrappers
@@ -985,8 +1024,27 @@ def teach_node(
         ],
     })
 
+    # Recalculate the learner's next recommended action
+    # after completing the explanation.
+    recommendation = build_recommendation(
+        mastery_score=teaching_inputs.get(
+            "mastery_score"
+        ),
+        weak_areas=teaching_inputs.get(
+            "weak_areas"
+        ),
+        last_action="explain",
+    )
+
     return {
-        "response": explanation
+        "response": explanation,
+        "last_action": "explain",
+        "recommended_action": recommendation[
+            "recommended_action"
+        ],
+        "recommendation_reason": recommendation[
+            "recommendation_reason"
+        ],
     }
 
 #----------------------------------------------------------
@@ -1337,13 +1395,9 @@ def submit_assessment_node(
         # Build the next-step recommendation using
         # the learner's updated mastery information.
         recommendation = build_recommendation(
-            mastery_score=updated_topic_mastery.get(
-                "mastery_score"
-            ),
-            weak_areas=updated_topic_mastery.get(
-                "weak_areas",
-                []
-            )
+            mastery_score=updated_topic_mastery["mastery_score"],
+            weak_areas=updated_topic_mastery.get("weak_areas"),
+            last_action="assess",
         )
 
         # Prepare the completed assessment results
@@ -1457,6 +1511,7 @@ def submit_assessment_node(
         "recommendation_reason": recommendation[
             "recommendation_reason"
         ],
+        "last_action": "assess",
         "response": (
             f"Assessment completed. "
             f"Score: {assessment_result['score']}/"
@@ -1629,7 +1684,8 @@ def practice_node(
     })
 
     return {
-        "response": practice
+        "response": practice,
+        "last_action": "practice",
     }
 
 #----------------------------------------------------------
@@ -1723,7 +1779,8 @@ def review_node(
     })
 
     return {
-        "response": review
+        "response": review,
+        "last_action": "review",
     }
 
 

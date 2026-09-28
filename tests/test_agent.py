@@ -43,6 +43,10 @@ from app.database.models import (
 
 from app.agent.recommendation import build_recommendation
 
+from app.core.learning_paths import (
+    AVAILABLE_LEARNING_PATHS,
+)
+
 def test_load_learner_context():
     """
     Test that the agent node loads learner data
@@ -738,9 +742,11 @@ def test_tutor_graph_end_to_end(monkeypatch):
     assert result["topic_mastery"]["topic_id"] == 3
     assert result["topic_mastery"]["mastery_score"] == 30
 
-    # A mastery score of 30 should result
-    # in an explanation recommendation.
-    assert result["recommended_action"] == "explain"
+    # A mastery score of 30 first routes the learner
+    # to an explanation. After the explanation is completed,
+    # the next recommended action should be practice.
+    assert result["last_action"] == "explain"
+    assert result["recommended_action"] == "practice"
 
 
 def test_tutor_graph_loads_conversation_history(monkeypatch):
@@ -3690,11 +3696,23 @@ def test_submit_initial_diagnostic_without_selected_path():
     assert "select a learning path" in result["response"].lower()
 
 
-def test_submit_initial_diagnostic_unconfigured_path():
+def test_submit_initial_diagnostic_unconfigured_path(
+    monkeypatch
+):
     """
     Test that a learning path without a target topic
-    cannot create a personalized learning path yet.
+    cannot create a personalized learning path.
     """
+
+    monkeypatch.setitem(
+        AVAILABLE_LEARNING_PATHS,
+        "machine_learning",
+        {
+            "name": "Machine Learning",
+            "diagnostic_topic_ids": [1],
+            "target_topic_id": None,
+        },
+    )
 
     with SessionLocal() as db:
         state = {

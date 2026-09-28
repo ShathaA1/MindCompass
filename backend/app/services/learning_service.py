@@ -363,78 +363,106 @@ def get_personalized_topic_ids(
 ) -> list[int]:
     """
     Build the learner's personalized study-topic list
-    based on diagnostic mastery and available learning content.
+    based on the selected curriculum and diagnostic mastery.
     """
 
-    # Topic IDs used only to store diagnostic mastery.
+    # Diagnostic topics are used only to measure
+    # prerequisite readiness.
     python_diagnostic_topic_id = 1
     ml_diagnostic_topic_id = 2
 
-    # RAG-backed reference materials used to fill
-    # prerequisite knowledge gaps.
-    python_material_topic_id = 27
-    ml_material_topic_id = 26
+    # Final curriculum topics for each learning path.
+    python_target_topic_id = 42
+    ml_target_topic_id = 34
+    agentic_ai_target_topic_id = 25
 
-    # Topics 1-3 are diagnostic/structural records
-    # and should not become study items.
-    non_learning_topic_ids = {1, 2, 3}
+    # Structural topics should never appear
+    # as learner-facing study topics.
+    non_learning_topic_ids = {
+        1,
+        2,
+        3,
+    }
 
     personalized_topic_ids = []
 
-    # Check Python readiness from the initial diagnostic.
-    python_mastery = get_topic_mastery(
-        db=db,
-        user_id=user_id,
-        topic_id=python_diagnostic_topic_id
-    )
+    def add_curriculum(
+        curriculum_target_id: int
+    ) -> None:
+        """
+        Add the full prerequisite chain for a curriculum
+        while preserving order and avoiding duplicates.
+        """
 
-    python_score = (
-        python_mastery.get("mastery_score")
-        if python_mastery
-        else None
-    )
-
-    # Add the actual Python learning material
-    # only when the learner has a Python gap.
-    if python_score is None or python_score < 85:
-        personalized_topic_ids.append(
-            python_material_topic_id
+        curriculum_topic_ids = get_required_topic_ids(
+            db=db,
+            topic_id=curriculum_target_id
         )
 
-    # Check Machine Learning readiness
-    # from the initial diagnostic.
-    ml_mastery = get_topic_mastery(
-        db=db,
-        user_id=user_id,
-        topic_id=ml_diagnostic_topic_id
-    )
+        for topic_id in curriculum_topic_ids:
+            if (
+                topic_id not in non_learning_topic_ids
+                and topic_id not in personalized_topic_ids
+            ):
+                personalized_topic_ids.append(
+                    topic_id
+                )
 
-    ml_score = (
-        ml_mastery.get("mastery_score")
-        if ml_mastery
-        else None
-    )
+    # Python is the foundation path and does not
+    # require a prerequisite diagnostic.
+    if target_topic_id == python_target_topic_id:
+        add_curriculum(
+            python_target_topic_id
+        )
+        return personalized_topic_ids
 
-    # Add the actual ML learning material
-    # only when the learner has an ML gap.
-    if ml_score is None or ml_score < 85:
-        personalized_topic_ids.append(
-            ml_material_topic_id
+    # Machine Learning and Agentic AI both require
+    # sufficient Python readiness.
+    if target_topic_id in {
+        ml_target_topic_id,
+        agentic_ai_target_topic_id,
+    }:
+        python_mastery = get_topic_mastery(
+            db=db,
+            user_id=user_id,
+            topic_id=python_diagnostic_topic_id
         )
 
-    # Load the curriculum required to reach
-    # the selected target topic.
-    required_topic_ids = get_required_topic_ids(
-        db=db,
-        topic_id=target_topic_id
-    )
+        python_score = (
+            python_mastery.get("mastery_score")
+            if python_mastery
+            else None
+        )
 
-    # Add only real learning-content topics.
-    # Diagnostic/structural topics are excluded.
-    personalized_topic_ids.extend(
-        topic_id
-        for topic_id in required_topic_ids
-        if topic_id not in non_learning_topic_ids
+        if python_score is None or python_score < 85:
+            add_curriculum(
+                python_target_topic_id
+            )
+
+    # Agentic AI also requires sufficient
+    # Machine Learning readiness.
+    if target_topic_id == agentic_ai_target_topic_id:
+        ml_mastery = get_topic_mastery(
+            db=db,
+            user_id=user_id,
+            topic_id=ml_diagnostic_topic_id
+        )
+
+        ml_score = (
+            ml_mastery.get("mastery_score")
+            if ml_mastery
+            else None
+        )
+
+        if ml_score is None or ml_score < 85:
+            add_curriculum(
+                ml_target_topic_id
+            )
+
+    # Finally, add the curriculum selected
+    # by the learner.
+    add_curriculum(
+        target_topic_id
     )
 
     return personalized_topic_ids

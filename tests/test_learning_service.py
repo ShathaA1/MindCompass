@@ -355,7 +355,7 @@ def test_create_personalized_agentic_ai_learning_path():
             # so Topic 26 should be added before the
             # Agentic AI curriculum.
             expected_topic_ids = [
-                26,
+                *range(28, 35),
                 *range(4, 26),
             ]
 
@@ -455,20 +455,29 @@ def test_create_personalized_agentic_ai_learning_path():
 
 @pytest.mark.parametrize(
     "python_score, ml_score, expected_prefix",
-    [
+        [
         # Both prerequisites are mastered.
         (90, 90, []),
 
         # Python needs remediation only.
-        (50, 90, [27]),
+        (50, 90, list(range(35, 43))),
 
         # Machine Learning needs remediation only.
-        (90, 60, [26]),
+        (90, 60, list(range(28, 35))),
 
         # Both Python and Machine Learning need remediation.
-        (50, 60, [27, 26]),
+        (
+            50,
+            60,
+            [
+                *range(35, 43),
+                *range(28, 35),
+            ],
+        ),
     ],
 )
+
+
 def test_personalized_topic_ids_by_diagnostic_mastery(
     python_score,
     ml_score,

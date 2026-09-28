@@ -304,8 +304,15 @@ def render():
         "No active topic"
     )
 
+    # Prefer the latest Tutor recommendation from
+    # the current session when it is available.
     recommended_action = (
-        dashboard_data.get("recommended_action")
+        st.session_state.get(
+            "latest_recommended_action"
+        )
+        or dashboard_data.get(
+            "recommended_action"
+        )
         or "Not available"
     )
 
@@ -382,7 +389,12 @@ def render():
 
         with col3:
             st.caption("Recommended Action")
-            st.markdown(
+
+            # Create a placeholder so the recommendation
+            # can be updated after the Tutor responds.
+            recommendation_placeholder = st.empty()
+
+            recommendation_placeholder.markdown(
                 f"**{recommended_action_text}**"
             )
     
@@ -572,6 +584,23 @@ def render():
         "agent_action"
     )
 
+    # Store the latest recommendation returned
+    # by the Tutor Agent for immediate UI updates.
+    latest_recommended_action = result.get(
+        "recommended_action"
+    )
+
+    if latest_recommended_action:
+        st.session_state[
+            "latest_recommended_action"
+        ] = latest_recommended_action
+
+        # Update the recommendation shown in the Tutor
+        # header immediately after the Agent responds.
+        recommendation_placeholder.markdown(
+            f"**{latest_recommended_action.replace('_', ' ').title()}**"
+        )
+
     assessment_questions = result.get(
         "assessment_questions",
         [],
@@ -681,8 +710,6 @@ def render():
             practice_history_parts.append(
                 f"\n\n**{index}. "
                 f"{item.get('prompt', '')}**"
-                f"\n\nAnswer: "
-                f"{item.get('answer', '')}"
             )
 
         st.session_state.tutor_messages.append(

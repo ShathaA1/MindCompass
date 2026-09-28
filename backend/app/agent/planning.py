@@ -154,11 +154,17 @@ def recommend_next_action(
         else []
     )
 
+
+    last_action = state.get(
+        "last_action"
+    )
+
     # Build a detailed recommendation using
     # mastery and the learner's weak areas.
     recommendation = build_recommendation(
         mastery_score=mastery_score,
-        weak_areas=weak_areas
+        weak_areas=weak_areas,
+        last_action=last_action,
     )
 
     # Store both the action and its reason
