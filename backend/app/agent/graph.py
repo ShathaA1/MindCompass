@@ -983,12 +983,14 @@ def teach_node(
 ) -> dict:
     """
     Generate a personalized teaching response using
-    the learner's current topic and retrieved context.
+    the learner's current topic and conversation context.
     """
 
     # Prepare the learner and topic information
     # required for the teaching workflow.
-    teaching_inputs = prepare_personalized_inputs(state)
+    teaching_inputs = prepare_personalized_inputs(
+        state
+    )
 
     if not teaching_inputs:
         return {
@@ -998,13 +1000,40 @@ def teach_node(
             )
         }
 
-    # Retrieve learning material from the current topic
-    # using the learner's specific request as the
-    # semantic search query.
+    user_message = teaching_inputs.get(
+        "user_message",
+        ""
+    )
+
+    conversation_history = state.get(
+        "conversation_history",
+        []
+    )
+
+    previous_explanation = state.get(
+        "topic_explanation"
+    )
+
+    # A stored explanation means the learner has
+    # already received the main topic explanation.
+    is_follow_up = bool(
+        previous_explanation
+    )
+
+    # Build a more meaningful retrieval query.
+    # Short follow-ups such as "more" still include
+    # the current topic so retrieval remains relevant.
+    retrieval_query = (
+        f'{teaching_inputs["topic_name"]}: '
+        f'{user_message}'
+    )
+
+    # Retrieve approved learning material from
+    # the current topic.
     context = retrieve_topic_context(
         topic_id=teaching_inputs["topic_id"],
         topic_name=teaching_inputs["topic_name"],
-        retrieval_query=teaching_inputs["user_message"]
+        retrieval_query=retrieval_query,
     )
 
     if not context:
@@ -1016,18 +1045,72 @@ def teach_node(
             )
         }
 
+    personalization_parts = []
 
-    personalization_parts = [
-        f'Teach the topic "{teaching_inputs["topic_name"]}".'
-    ]
-    
-    personalization_parts.extend(
-        build_personalization_parts(
-            inputs=teaching_inputs,
-            request_label="The learner specifically asked",
+    if is_follow_up:
+        # Answer only the learner's latest follow-up
+        # instead of restarting the full lesson.
+        personalization_parts.append(
+            (
+                f'Continue the discussion about '
+                f'"{teaching_inputs["topic_name"]}". '
+                "Answer only the learner's latest request. "
+                "Use the previous explanation and recent "
+                "conversation to understand short follow-ups. "
+                "Do not restart, repeat, or summarize the full "
+                "topic unless the learner explicitly asks for it."
+            )
         )
-    )
-    
+
+        personalization_parts.append(
+            (
+                "The learner's latest request is: "
+                f'"{user_message}".'
+            )
+        )
+
+        # Include the previous explanation so short
+        # follow-ups can be interpreted correctly.
+        personalization_parts.append(
+            (
+                "Previous topic explanation: "
+                f"{previous_explanation}"
+            )
+        )
+
+        # Include recent conversation context when available.
+        if conversation_history:
+            history_text = format_conversation_history(
+                conversation_history
+            )
+
+            if history_text:
+                personalization_parts.append(
+                    (
+                        "Recent conversation: "
+                        f"{history_text}"
+                    )
+                )
+
+    else:
+        # Generate the main explanation when the learner
+        # is entering the topic for the first time.
+        personalization_parts.append(
+            (
+                f'Teach the topic '
+                f'"{teaching_inputs["topic_name"]}".'
+            )
+        )
+
+        personalization_parts.extend(
+            build_personalization_parts(
+                inputs=teaching_inputs,
+                request_label=(
+                    "The learner specifically asked"
+                ),
+            )
+        )
+
     weak_area_names = normalize_weak_areas(
         teaching_inputs.get(
             "weak_areas"
@@ -1036,20 +1119,19 @@ def teach_node(
 
     if weak_area_names:
         personalization_parts.append(
-            "Focus especially on these weak areas: "
-            + ", ".join(weak_area_names)
-            + "."
-    )
-
-    
+            (
+                "Focus especially on these weak areas: "
+                + ", ".join(weak_area_names)
+                + "."
+            )
+        )
 
     personalized_topic = " ".join(
         personalization_parts
     )
 
-    # Generate a personalized explanation using
-    # learner mastery, weak areas, preferences,
-    # and retrieved course material.
+    # Generate the explanation or follow-up response
+    # using approved course material.
     explanation = explain.invoke({
         "topic": personalized_topic,
         "context": context,
@@ -1058,8 +1140,8 @@ def teach_node(
         ],
     })
 
-    # Recalculate the learner's next recommended action
-    # after completing the explanation.
+    # Recalculate the learner's recommended next
+    # action after the teaching interaction.
     recommendation = build_recommendation(
         mastery_score=teaching_inputs.get(
             "mastery_score"
@@ -1072,7 +1154,15 @@ def teach_node(
 
     return {
         "response": explanation,
-        "topic_explanation": explanation,
+
+        # Keep the original topic explanation as the
+        # stable learning context for later practice,
+        # review, and assessment generation.
+        "topic_explanation": (
+            previous_explanation
+            or explanation
+        ),
+
         "last_action": "explain",
         "recommended_action": recommendation[
             "recommended_action"

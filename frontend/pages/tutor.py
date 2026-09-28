@@ -397,77 +397,41 @@ def render_stored_message(message: dict) -> None:
         st.markdown(content)
 
 
-def render_next_step_card(
+def render_next_step_message(
     recommended_action: str | None,
-) -> str | None:
+) -> None:
     """
-    Display the learner's recommended next step
-    and return the selected action when clicked.
+    Display a learner-friendly suggestion for
+    the next recommended learning step.
     """
 
-    if not recommended_action:
-        return None
-
-    action_config = {
-        "explain": {
-            "title": "Learn the Topic",
-            "description": (
-                "Build your understanding with a clear "
-                "explanation of the current topic."
-            ),
-            "button": "Start Learning",
-        },
-        "practice": {
-            "title": "Practice",
-            "description": (
-                "Strengthen your understanding with "
-                "a short practice activity."
-            ),
-            "button": "Start Practice",
-        },
-        "assess": {
-            "title": "Assessment",
-            "description": (
-                "Check your understanding before "
-                "moving forward."
-            ),
-            "button": "Take Assessment",
-        },
-        "review": {
-            "title": "Review",
-            "description": (
-                "Focus on the areas that still need "
-                "a little more attention."
-            ),
-            "button": "Start Review",
-        },
+    messages = {
+        "practice": (
+            "If you have any questions about this explanation, "
+            "feel free to ask. Otherwise, we can move on to practice."
+        ),
+        "assess": (
+            "If you'd like to clarify anything first, ask me. "
+            "Otherwise, we can move on to the assessment."
+        ),
+        "review": (
+            "If anything is still unclear, I can explain it again. "
+            "Otherwise, we can review the areas that need more attention."
+        ),
+        "recommend": (
+            "If you have any final questions about this topic, ask me. "
+            "Otherwise, we can continue to the next topic."
+        ),
     }
 
-    config = action_config.get(
+    message = messages.get(
         recommended_action
     )
 
-    # The next-topic transition already has
-    # its own Continue to Next Topic control.
-    if not config:
-        return None
+    if message:
+        st.caption(message)
 
-    st.markdown("#### Recommended next step")
-    st.markdown(
-        f"**{config['title']}**"
-    )
-    st.caption(
-        config["description"]
-    )
 
-    if st.button(
-        config["button"],
-        type="primary",
-        key=f"next_step_{recommended_action}",
-    ):
-        return recommended_action
-
-    return None
 
 
 def render():
@@ -826,11 +790,6 @@ def render():
     # Learner message
     # ---------------------------------------------------------
 
-    # Display the next recommended learning step
-    # selected_next_action = render_next_step_card(
-    #     recommended_action
-    # )
-
 
     # Keep free-form chat available so the learner
     # can still ask questions at any time.
@@ -1053,6 +1012,10 @@ def render():
     with st.chat_message("assistant"):
         st.markdown(
             tutor_response
+        )
+
+        render_next_step_message(
+            latest_recommended_action
         )
 
     # Show a clear transition button when the learner

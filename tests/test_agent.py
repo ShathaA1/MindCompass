@@ -2576,9 +2576,11 @@ def test_teach_node_generates_explanation(
             )
 
             assert (
-                "The learner specifically asked: "
-                "Explain how an AI agent uses tools."
-                in inputs["topic"]
+                retrieved_query["retrieval_query"]
+                == (
+                    "Building Your First Agent: "
+                    "Explain how an AI agent uses tools."
+                )
             )
             assert (
                 inputs["student_level"]
@@ -2628,8 +2630,8 @@ def test_teach_node_generates_explanation(
     # Verify that the learner's actual request
     # is used as the semantic retrieval query.
     assert (
-        retrieved_query["retrieval_query"]
-        == "Explain how an AI agent uses tools."
+        "Explain how an AI agent uses tools."
+        in retrieved_query["retrieval_query"]
     )
 
     # Verify the final teaching response.
