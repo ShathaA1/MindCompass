@@ -38,14 +38,14 @@ def determine_recommended_action(
 
     # Good mastery should alternate between
     # focused review and reassessment.
-    if mastery_score < 85:
+    if mastery_score < 80:
         if last_action == "review":
             return "assess"
 
         return "review"
 
-    # High mastery means the learner is ready
-    # to continue to the next topic.
+    # Mastery of 80% or higher means the learner
+    # is ready to continue to the next topic.
     return "recommend"
 
 
@@ -101,7 +101,7 @@ def build_recommendation(
 
     # Good mastery indicates that the learner
     # should review remaining gaps before progressing.
-    elif mastery_score < 85:
+    elif mastery_score < 80:
         if weak_areas:
             reason = (
                 f"Mastery is {mastery_score}%. "
@@ -130,7 +130,7 @@ def build_recommendation(
             f"Mastery is {mastery_score}%. "
             "The learner has demonstrated strong mastery "
             "and is ready for the next learning step."
-        )
+    )
 
     return {
         "recommended_action": recommended_action,

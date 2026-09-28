@@ -4,65 +4,212 @@ from app.agent.state import TutorState
 from app.services.learning_service import select_next_topic
 from app.agent.recommendation import build_recommendation
 
+from app.agent.intent_classifier import (
+    classify_learner_intent,
+)
+
 def determine_learner_need(
     state: TutorState
 ) -> dict:
     """
     Determine what the learner currently needs
-    based on the user message.
+    based on the learner's message.
     """
 
-    # Normalize the learner message so keyword
+    # Normalize the learner message so intent
     # matching is case-insensitive.
     user_message = state.get(
         "user_message",
         ""
-    ).lower()
+    ).lower().strip()
 
+    # Define learner intents in priority order.
+    # More specific learning requests should be
+    # checked before general continuation requests.
     # Define learner intents in priority order.
     intent_keywords = {
         "explain": [
             "explain",
+            "explain this",
+            "explain it",
+            "explain again",
+            "explain more",
+            "can you explain",
+            "could you explain",
+            "please explain",
             "understand",
+            "help me understand",
+            "i don't understand",
+            "i do not understand",
+            "i'm confused",
+            "i am confused",
+            "clarify",
+            "simplify",
+            "make it simpler",
+            "in simple words",
+            "in simple terms",
             "what is",
+            "what are",
+            "what does",
+            "what do",
+            "what does this mean",
+            "define",
+            "definition",
+            "tell me about",
+            "teach me",
             "how does",
             "how do",
-            "tell me about",
-            "clarify",
+            "how is",
+            "how can",
+            "why",
+            "why is",
+            "why does",
+            "difference between",
+            "what is the difference",
+            "compare",
+            "example",
+            "examples",
+            "give me an example",
+            "give me examples",
+            "give me more examples",
+            "more examples",
+            "another example",
+            "show me an example",
+            "show me examples",
+            "application",
+            "applications",
+            "more applications",
+            "another application",
+            "use case",
+            "use cases",
+            "real-world example",
+            "real world example",
+            "tell me more",
+            "more details",
+            "more information",
+            "elaborate",
+            "expand on",
+            "what about",
+            "how about",
+            "more about",
+            "another example",
+            "another application",
+            "another field",
+            "another area",
+            "another domain",
+            "other examples",
+            "other applications",
+            "other fields",
+            "other areas",
+            "other domains",
         ],
+
         "assess": [
-            "quiz",
+            "quiz me",
+            "give me a quiz",
+            "start quiz",
+            "take a quiz",
             "test me",
-            "assess",
-            "assessment",
-            "questions",
+            "give me a test",
+            "assess me",
+            "start assessment",
+            "take assessment",
+            "take an assessment",
             "check my understanding",
+            "check my knowledge",
+            "evaluate me",
+            "test my understanding",
+            "test my knowledge",
+            "assessment questions",
+            "mini exam",
         ],
+
         "practice": [
             "practice",
-            "exercise",
-            "example",
+            "practice this",
+            "practice the topic",
+            "practice this topic",
+            "start practice",
             "give me practice",
-            "try some",
+            "give me some practice",
+            "practice activity",
+            "practice activities",
+            "exercise",
+            "exercises",
+            "give me an exercise",
+            "give me exercises",
+            "let me practice",
+            "i want to practice",
+            "let's practice",
+            "try some exercises",
+            "hands-on practice",
+            "hands on practice",
+            "practice questions",
+            "practice problem",
+            "practice problems",
+            "coding practice",
+            "coding exercise",
+            "scenario practice",
+            "flashcards",
+            "flashcard",
+            "short answer",
+            "short-answer",
+            "guided practice",
         ],
+
         "review": [
             "review",
+            "review this",
+            "review the topic",
+            "review this topic",
+            "start review",
             "revise",
+            "revision",
             "recap",
+            "give me a recap",
             "summarize",
+            "summarise",
+            "summary",
+            "give me a summary",
             "go over",
+            "go over this",
+            "refresh my memory",
+            "quick review",
+            "quick recap",
+            "review weak areas",
+            "review my weak areas",
+            "review mistakes",
+            "review my mistakes",
+            "focus on weak areas",
         ],
+
         "recommend": [
-            "next",
-            "recommend",
-            "what should i learn",
+            "what's next",
+            "whats next",
+            "what is next",
+            "next step",
+            "what is the next step",
             "what should i do",
+            "what should i do next",
+            "what should i learn",
+            "what should i learn next",
+            "what do you recommend",
+            "recommend",
             "continue",
+            "continue learning",
+            "continue the lesson",
+            "keep going",
+            "go on",
+            "move on",
+            "move forward",
+            "proceed",
+            "ready to continue",
+            "what now",
         ],
     }
 
-    # Check each intent in priority order
-    # and stop at the first matching category.
+    # Check each intent in priority order and
+    # stop at the first matching category.
     for learner_need, keywords in intent_keywords.items():
         if any(
             keyword in user_message
@@ -72,10 +219,20 @@ def determine_learner_need(
                 "learner_need": learner_need
             }
 
-    # Use recommendation when no explicit
-    # learner intent can be identified.
+    # Use the LLM classifier when keyword matching
+    # cannot confidently identify the learner intent.
+    conversation_history = state.get(
+        "conversation_history",
+        []
+    )
+
+    learner_need = classify_learner_intent(
+        user_message=user_message,
+        conversation_history=conversation_history,
+    )
+
     return {
-        "learner_need": "recommend"
+        "learner_need": learner_need
     }
 
 
