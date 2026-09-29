@@ -2,6 +2,7 @@
 
 import streamlit as st
 import json
+import streamlit.components.v1 as components
 
 from frontend.api_client import (
     create_chat_session,
@@ -431,6 +432,25 @@ def render_next_step_message(
     if message:
         st.caption(message)
 
+
+def scroll_to_bottom() -> None:
+    """
+    Scroll the Tutor page to the latest response.
+    """
+
+    components.html(
+        """
+        <script>
+        setTimeout(() => {
+            window.parent.scrollTo({
+                top: window.parent.document.body.scrollHeight,
+                behavior: "smooth"
+            });
+        }, 100);
+        </script>
+        """,
+        height=0,
+    )
 
 
 
@@ -967,8 +987,8 @@ def render():
                     st.markdown(
                         str(answer)
                     )
-
-
+        
+        scroll_to_bottom()
         # Store a readable version in chat history.
         practice_history_parts = [
             "### "
@@ -1017,6 +1037,9 @@ def render():
         render_next_step_message(
             latest_recommended_action
         )
+
+    # Move the page to the latest Tutor response.
+    scroll_to_bottom()
 
     # Show a clear transition button when the learner
     # is ready to move to the next topic.
