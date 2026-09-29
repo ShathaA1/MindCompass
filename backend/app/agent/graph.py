@@ -12,6 +12,7 @@ from app.services.learning_service import (
     complete_learning_path,
     get_diagnostic_topics,
     create_learning_path,
+    get_topic_id_by_key,
 )
 from langgraph.graph import StateGraph, START, END
 
@@ -765,16 +766,24 @@ def generate_initial_diagnostic_node(
                 )
             }
 
-        target_topic_id = path_config.get(
-            "target_topic_id"
+        target_topic_key = path_config.get(
+            "target_topic_key"
         )
 
-        if target_topic_id is None:
+        if not target_topic_key:
             return {
                 "response": (
                     "This learning path is not fully configured yet."
                 )
             }
+
+        try:
+            target_topic_id = get_topic_id_by_key(
+                db=db,
+                topic_key=target_topic_key,
+            )
+        except ValueError as error:
+            return {"response": str(error)}
 
         # Create the learning path immediately when
         # no prerequisite diagnostic is required.
@@ -823,22 +832,48 @@ def generate_initial_diagnostic_node(
         or learner_context.get("initial_level")
         or "beginner"
     )
+        # Resolve diagnostic and curriculum topics from stable keys
+    # instead of relying on environment-specific numeric IDs.
+    python_diagnostic_topic_id = get_topic_id_by_key(
+        db,
+        "python_ch0_1",
+    )
+    ml_diagnostic_topic_id = get_topic_id_by_key(
+        db,
+        "machine_learning_ch0_1",
+    )
+
+    python_curriculum_topic_ids = [
+        get_topic_id_by_key(
+            db,
+            f"python_ch{chapter_number}_1",
+        )
+        for chapter_number in range(1, 9)
+    ]
+
+    ml_curriculum_topic_ids = [
+        get_topic_id_by_key(
+            db,
+            f"machine_learning_ch{chapter_number}_1",
+        )
+        for chapter_number in range(1, 8)
+    ]
 
     diagnostic_question_distribution = {
         "machine_learning": {
-            1: 10,
+            python_diagnostic_topic_id: 10,
         },
         "agentic_ai": {
-            1: 5,
-            2: 5,
+            python_diagnostic_topic_id: 5,
+            ml_diagnostic_topic_id: 5,
         },
     }
 
-    # Map each diagnostic topic to the current
-    # RAG-backed curriculum used for question generation.
+    # Map each diagnostic topic to its RAG-backed
+    # curriculum using the resolved database IDs.
     diagnostic_rag_sources = {
-        1: {
-            "topic_ids": list(range(35, 43)),
+        python_diagnostic_topic_id: {
+            "topic_ids": python_curriculum_topic_ids,
             "topic_name": "Python Fundamentals",
             "retrieval_query": (
                 "Python fundamentals including variables, data types, "
@@ -846,8 +881,8 @@ def generate_initial_diagnostic_node(
                 "functions, and basic Python programming concepts"
             ),
         },
-        2: {
-            "topic_ids": list(range(28, 35)),
+        ml_diagnostic_topic_id: {
+            "topic_ids": ml_curriculum_topic_ids,
             "topic_name": "Machine Learning Fundamentals",
             "retrieval_query": (
                 "Machine learning fundamentals including supervised "
@@ -857,7 +892,6 @@ def generate_initial_diagnostic_node(
                 "and evaluation"
             ),
         },
-        
     }
 
     question_distribution = (
@@ -1002,18 +1036,24 @@ def submit_initial_diagnostic_node(
             )
         }
 
-    # A target topic is required to create
-    # the personalized learning path.
-    target_topic_id = path_config.get(
-        "target_topic_id"
+    target_topic_key = path_config.get(
+        "target_topic_key"
     )
 
-    if target_topic_id is None:
+    if not target_topic_key:
         return {
             "response": (
                 "This learning path is not fully configured yet."
             )
         }
+
+    try:
+        target_topic_id = get_topic_id_by_key(
+            db=db,
+            topic_key=target_topic_key,
+        )
+    except ValueError as error:
+        return {"response": str(error)}
 
     # Load the diagnostic questions and
     # the learner's submitted answers.

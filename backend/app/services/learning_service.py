@@ -32,66 +32,77 @@ def get_available_learning_path(path_key: str) -> dict:
     # Return the selected learning path configuration.
     return AVAILABLE_LEARNING_PATHS[normalized_path_key]
 
+def get_topic_by_key(
+    db: Session,
+    topic_key: str
+) -> Topic:
+    """Load a topic using its stable application key."""
+    topic = (
+        db.query(Topic)
+        .filter(Topic.topic_key == topic_key)
+        .first()
+    )
+
+    if topic is None:
+        raise ValueError(
+            f"Topic not found for key: {topic_key}"
+        )
+
+    return topic
+
+
+def get_topic_id_by_key(
+    db: Session,
+    topic_key: str
+) -> int:
+    """Resolve a stable topic key to its database ID."""
+    return get_topic_by_key(
+        db=db,
+        topic_key=topic_key
+    ).topic_id
+
+
 def get_diagnostic_topics(
     db: Session,
     path_key: str
 ) -> list[dict]:
-    """
-    Load the topics that should be assessed
-    before the learner starts the selected learning path.
-    """
-
-    # Validate the selected learning path
-    # and load its configuration.
+    """Load diagnostic topics using stable topic keys."""
     path_config = get_available_learning_path(path_key)
-
-    # Get the prerequisite topics that should
-    # be included in the diagnostic assessment.
-    diagnostic_topic_ids = path_config.get(
-        "diagnostic_topic_ids",
+    diagnostic_topic_keys = path_config.get(
+        "diagnostic_topic_keys",
         []
     )
 
-    # Some learning paths may not require
-    # a prerequisite diagnostic assessment.
-    if not diagnostic_topic_ids:
+    if not diagnostic_topic_keys:
         return []
 
-    # Load the diagnostic topics from the database.
     topics = (
         db.query(Topic)
-        .filter(Topic.topic_id.in_(diagnostic_topic_ids))
+        .filter(Topic.topic_key.in_(diagnostic_topic_keys))
         .all()
     )
-
-    # Create a lookup so the final result follows
-    # the order defined in the path configuration.
-    topics_by_id = {
-        topic.topic_id: topic
+    topics_by_key = {
+        topic.topic_key: topic
         for topic in topics
     }
-
-    # Make sure every configured topic exists
-    # in the database.
-    missing_topic_ids = [
-        topic_id
-        for topic_id in diagnostic_topic_ids
-        if topic_id not in topics_by_id
+    missing_topic_keys = [
+        topic_key
+        for topic_key in diagnostic_topic_keys
+        if topic_key not in topics_by_key
     ]
 
-    if missing_topic_ids:
+    if missing_topic_keys:
         raise ValueError(
-            f"Diagnostic topics not found: {missing_topic_ids}"
+            "Diagnostic topics not found: "
+            f"{missing_topic_keys}"
         )
 
-    # Return the structure expected by
-    # the quiz generation tool.
     return [
         {
-            "topic_id": topic_id,
-            "topic": topics_by_id[topic_id].name,
+            "topic_id": topics_by_key[topic_key].topic_id,
+            "topic": topics_by_key[topic_key].name,
         }
-        for topic_id in diagnostic_topic_ids
+        for topic_key in diagnostic_topic_keys
     ]
 
 
@@ -365,23 +376,33 @@ def get_personalized_topic_ids(
     Build the learner's personalized study-topic list
     based on the selected curriculum and diagnostic mastery.
     """
+    python_diagnostic_topic_id = get_topic_id_by_key(
+        db,
+        "python_ch0_1"
+    )
+    ml_diagnostic_topic_id = get_topic_id_by_key(
+        db,
+        "machine_learning_ch0_1"
+    )
 
-    # Diagnostic topics are used only to measure
-    # prerequisite readiness.
-    python_diagnostic_topic_id = 1
-    ml_diagnostic_topic_id = 2
+    python_target_topic_id = get_topic_id_by_key(
+        db,
+        "python_ch8_1"
+    )
+    ml_target_topic_id = get_topic_id_by_key(
+        db,
+        "machine_learning_ch7_1"
+    )
+    agentic_ai_target_topic_id = get_topic_id_by_key(
+        db,
+        "agentic_ai_ch5_3"
+    )
 
-    # Final curriculum topics for each learning path.
-    python_target_topic_id = 42
-    ml_target_topic_id = 34
-    agentic_ai_target_topic_id = 25
-
-    # Structural topics should never appear
-    # as learner-facing study topics.
+    # Diagnostic reference topics measure prerequisite
+    # readiness and should not become study-path items.
     non_learning_topic_ids = {
-        1,
-        2,
-        3,
+        python_diagnostic_topic_id,
+        ml_diagnostic_topic_id,
     }
 
     personalized_topic_ids = []
@@ -745,4 +766,3 @@ def get_topic_recommended_action(
     return determine_recommended_action(
         mastery_score=mastery_score
     )
-

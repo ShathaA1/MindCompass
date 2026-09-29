@@ -48,6 +48,8 @@ from app.database.models import (
 
 from app.services.learning_service import (
     get_active_learning_path,
+    get_topic_by_key,
+    get_topic_id_by_key,
     select_next_topic,
 )
 
@@ -3508,40 +3510,40 @@ def test_generate_initial_diagnostic_agentic_ai(
     }
 
     with SessionLocal() as db:
+        python_topic = get_topic_by_key(
+            db,
+            "python_ch0_1",
+        )
+        ml_topic = get_topic_by_key(
+            db,
+            "machine_learning_ch0_1",
+        )
+        expected_topics = [
+            {
+                "topic_id": python_topic.topic_id,
+                "topic": python_topic.name,
+            },
+            {
+                "topic_id": ml_topic.topic_id,
+                "topic": ml_topic.name,
+            },
+        ]
+
         result = generate_initial_diagnostic_node(
             state,
             db
         )
 
-    assert result["diagnostic_topics"] == [
-        {
-            "topic_id": 1,
-            "topic": "Python Basics",
-        },
-        {
-            "topic_id": 2,
-            "topic": "Machine Learning Basics",
-        },
-    ]
+    assert result["diagnostic_topics"] == expected_topics
 
     assert quiz_calls == [
         {
-            "topics": [
-                {
-                    "topic_id": 1,
-                    "topic": "Python Basics",
-                }
-            ],
+            "topics": [expected_topics[0]],
             "num_questions": 5,
             "assessment_type": "diagnostic",
         },
         {
-            "topics": [
-                {
-                    "topic_id": 2,
-                    "topic": "Machine Learning Basics",
-                }
-            ],
+            "topics": [expected_topics[1]],
             "num_questions": 5,
             "assessment_type": "diagnostic",
         },
@@ -3638,9 +3640,26 @@ def test_initial_diagnostic_uses_rag_backed_reference_topics(
             db
         )
 
+    with SessionLocal() as db:
+        expected_python_topic_ids = [
+            get_topic_id_by_key(
+                db,
+                f"python_ch{chapter_number}_1",
+            )
+            for chapter_number in range(1, 9)
+        ]
+
+        expected_ml_topic_ids = [
+            get_topic_id_by_key(
+                db,
+                f"machine_learning_ch{chapter_number}_1",
+            )
+            for chapter_number in range(1, 8)
+        ]
+
     assert retrieved_topic_ids == (
-        list(range(35, 43))
-        + list(range(28, 35))
+        expected_python_topic_ids
+        + expected_ml_topic_ids
     )
 
     python_query = (
@@ -3735,7 +3754,10 @@ def test_submit_initial_diagnostic_node(monkeypatch):
         goal,
     ):
         assert user_id == 2
-        assert target_topic_id == 25
+        assert target_topic_id == get_topic_id_by_key(
+            db,
+            "agentic_ai_ch5_3",
+        )
         assert path_name == "Agentic AI Learning Path"
         assert goal == "Learn Agentic AI"
 
@@ -3860,8 +3882,8 @@ def test_submit_initial_diagnostic_unconfigured_path(
         "machine_learning",
         {
             "name": "Machine Learning",
-            "diagnostic_topic_ids": [1],
-            "target_topic_id": None,
+            "diagnostic_topic_keys": ["agentic_ai_ch1_1"],
+            "target_topic_key": None,
         },
     )
 

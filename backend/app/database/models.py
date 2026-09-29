@@ -128,6 +128,11 @@ class Topic(Base):
     __tablename__ = "topics"
 
     topic_id = Column(Integer, primary_key=True)
+    topic_key = Column(
+    String(100),
+    nullable=False,
+    unique=True
+    )
     name = Column(String(255), nullable=False)
     description = Column(String(500), nullable=False)
     difficulty_level = Column(String(50), nullable=False)
