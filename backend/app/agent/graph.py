@@ -25,6 +25,8 @@ from app.agent.planning import (
 
 from app.agent.recommendation import build_recommendation
 
+from app.agent.intent_classifier import classify_topic_scope
+
 from app.database.models import ChatMessage
 
 from app.services.chat_service import get_recent_messages
@@ -274,12 +276,23 @@ def plan_next_topic_node(
     state: TutorState
 ) -> dict:
     """
-    LangGraph node that selects the learner's
-    next available topic.
+    Keep the topic already associated with the current
+    chat session, or select the next learning-path topic
+    when no session topic has been provided.
     """
 
-    # Open a database session because
-    # topic planning requires database access.
+    # A topic-based chat session should always remain
+    # attached to its original topic.
+    current_topic = state.get(
+        "current_topic",
+        {}
+    )
+
+    if current_topic.get("topic_id"):
+        return {}
+
+    # Fall back to normal learning-path planning when
+    # the conversation is not tied to a specific topic.
     with SessionLocal() as db:
         return plan_next_topic(
             state=state,
@@ -399,6 +412,72 @@ def route_assessment(
     return "generate_assessment"
 
 
+
+def route_topic_scope(
+    state: TutorState
+) -> str:
+    """
+    Check whether the learner's request belongs
+    to the current topic and route accordingly.
+    """
+
+    current_topic = state.get(
+        "current_topic",
+        {}
+    )
+
+    topic_name = current_topic.get(
+        "name"
+    )
+
+    user_message = state.get(
+        "user_message",
+        ""
+    )
+
+    # Continue normally when topic information
+    # is not available for scope validation.
+    if not topic_name or not user_message:
+        return "continue"
+
+    topic_scope = classify_topic_scope(
+        user_message=user_message,
+        current_topic_name=topic_name,
+    )
+
+
+    if topic_scope == "out_of_scope":
+        return "out_of_scope"
+
+    return "continue"
+
+def out_of_scope_node(
+    state: TutorState
+) -> dict:
+    """
+    Tell the learner to stay within
+    the current learning topic.
+    """
+
+
+    current_topic = state.get(
+        "current_topic",
+        {}
+    )
+
+    topic_name = current_topic.get(
+        "name",
+        "the current topic"
+    )
+
+    return {
+        "response": (
+            "That request is outside your current learning topic. "
+            f"We're currently working on **{topic_name}**. "
+            "You can ask for explanations, examples, practice, "
+            "review, or assessment related to this topic."
+        ),
+    }
 #----------------------------------------------------------
 # Shared personalization helpers
 #----------------------------------------------------------
@@ -1809,6 +1888,7 @@ def select_practice_type(
     topic_name: str,
     mastery_score: float | None,
     preferred_format: str | None,
+    user_message: str | None = None,
 ) -> str:
     """
     Select a simplified practice type using
@@ -1817,6 +1897,33 @@ def select_practice_type(
     """
 
     topic_name_lower = topic_name.lower()
+
+    # Respect an explicitly requested practice format
+    # before applying learner profile preferences.
+    user_message_lower = (
+        user_message.strip().lower()
+        if user_message
+        else ""
+    )
+
+    if "scenario" in user_message_lower:
+        return "scenario"
+
+    if "flashcard" in user_message_lower:
+        return "flashcards"
+
+    if (
+        "short answer" in user_message_lower
+        or "short_answer" in user_message_lower
+    ):
+        return "short_answer"
+
+    if (
+        "coding" in user_message_lower
+        or "code practice" in user_message_lower
+        or "coding practice" in user_message_lower
+    ):
+        return "coding"
 
     # Detect whether the topic is technical
     # and suitable for coding practice.
@@ -2033,6 +2140,9 @@ def practice_node(
         ),
         preferred_format=practice_inputs.get(
             "preferred_format"
+        ),
+        user_message=practice_inputs.get(
+            "user_message"
         ),
     )
     num_items = extract_practice_item_count(
@@ -2516,6 +2626,12 @@ def build_tutor_graph():
         plan_next_topic_node
     )
 
+
+    workflow.add_node(
+        "out_of_scope",
+        out_of_scope_node
+    )
+
     # Add the node that loads mastery information
     # for the selected topic.
     workflow.add_node(
@@ -2638,10 +2754,20 @@ def build_tutor_graph():
         "plan_next_topic"
     )
 
-    workflow.add_edge(
+    workflow.add_conditional_edges(
         "plan_next_topic",
-        "load_topic_mastery"
+        route_topic_scope,
+        {
+            "continue": "load_topic_mastery",
+            "out_of_scope": "out_of_scope",
+        }
     )
+
+    workflow.add_edge(
+        "out_of_scope",
+        END
+    )
+
 
     workflow.add_edge(
         "load_topic_mastery",

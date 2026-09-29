@@ -60,9 +60,23 @@ def start_chat_session(
             "user_id": user_id,
             "session_id": session.chat_session_id,
 
+            # Keep the new session attached to
+            # the topic selected by the learner.
+            "current_topic": (
+                {
+                    "topic_id": session.topic.topic_id,
+                    "name": session.topic.name,
+                    "description": session.topic.description,
+                    "difficulty_level": (
+                        session.topic.difficulty_level
+                    ),
+                }
+                if session.topic
+                else {}
+            ),
+
             # This is an internal instruction used only
-            # to start the Tutor workflow. It is not saved
-            # as a learner message in conversation history.
+            # to start the Tutor workflow.
             "user_message": (
                 "Explain the current topic clearly "
                 "and introduce its main concepts."
@@ -255,6 +269,21 @@ def send_chat_message(
         "user_id": user_id,
         "session_id": session_id,
         "user_message": data.message,
+
+        # Keep the Tutor tied to the topic that belongs
+        # to this specific chat session.
+        "current_topic": (
+            {
+                "topic_id": session.topic.topic_id,
+                "name": session.topic.name,
+                "description": session.topic.description,
+                "difficulty_level": (
+                    session.topic.difficulty_level
+                ),
+            }
+            if session.topic
+            else {}
+        ),
     }
 
     try:

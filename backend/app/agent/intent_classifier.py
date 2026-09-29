@@ -126,3 +126,115 @@ Latest learner message:
         pass
 
     return "recommend"
+
+
+def classify_topic_scope(
+    user_message: str,
+    current_topic_name: str,
+) -> str:
+    """
+    Determine whether the learner's request belongs
+    to the current learning topic.
+
+    Returns:
+        - in_scope
+        - no_explicit_topic
+        - out_of_scope
+    """
+
+    # Treat empty or generic requests as referring
+    # to the learner's current topic.
+    if not user_message.strip():
+        return "no_explicit_topic"
+
+    prompt = f"""
+You are a topic-scope classifier for an AI tutoring system.
+
+Current learning topic:
+{current_topic_name}
+
+Learner request:
+{user_message}
+
+Classify the learner request into exactly one category:
+
+in_scope
+- The request is clearly about the current topic.
+- The learner may ask about a concept, subtopic, example,
+  application, clarification, practice activity, or deeper
+  explanation related to the current topic.
+- The exact current topic name does not need to appear.
+
+no_explicit_topic
+- The learner asks for an activity or continuation without
+  naming a different subject.
+- Examples:
+  "Explain more"
+  "Give me 3 flashcards"
+  "Give me another example"
+  "Quiz me"
+  "Let's practice"
+  "Can you explain that again?"
+
+out_of_scope
+- The learner explicitly asks to learn, explain, practice,
+  review, or be assessed on a different topic.
+- This includes another course topic even if it exists
+  elsewhere in the learning path.
+
+Examples:
+
+Current topic: Prompt Engineering
+Request: "Explain zero-shot prompting"
+Answer: in_scope
+
+Current topic: Prompt Engineering
+Request: "Give me 2 scenarios about prompt optimization"
+Answer: in_scope
+
+Current topic: Prompt Engineering
+Request: "Give me 3 flashcards"
+Answer: no_explicit_topic
+
+Current topic: Prompt Engineering
+Request: "Explain more"
+Answer: no_explicit_topic
+
+Current topic: Prompt Engineering
+Request: "Give me 3 flashcards about RAG"
+Answer: out_of_scope
+
+Current topic: Prompt Engineering
+Request: "Quiz me on transformers"
+Answer: out_of_scope
+
+Current topic: Prompt Engineering
+Request: "Explain Python functions"
+Answer: out_of_scope
+
+Return only one of:
+in_scope
+no_explicit_topic
+out_of_scope
+"""
+
+    try:
+        response = intent_llm.invoke(prompt)
+
+        result = response.content.strip().lower()
+
+        allowed_results = {
+            "in_scope",
+            "no_explicit_topic",
+            "out_of_scope",
+        }
+
+        if result in allowed_results:
+            return result
+
+    except Exception:
+        pass
+
+    # Use a permissive fallback so temporary classifier
+    # failures do not block normal tutoring.
+    return "no_explicit_topic"

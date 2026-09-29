@@ -26,6 +26,9 @@ from app.agent.graph import (
     select_practice_type,
     extract_practice_item_count,
     prepare_personalized_inputs,
+    route_topic_scope,
+    out_of_scope_node,
+    plan_next_topic_node,
 )
 from app.agent.planning import (
     determine_learner_need,
@@ -41,6 +44,11 @@ from app.database.models import (
     LearningPath,
     ChatSession,
     ChatMessage,
+)
+
+from app.services.learning_service import (
+    get_active_learning_path,
+    select_next_topic,
 )
 
 from app.agent.recommendation import build_recommendation
@@ -5324,3 +5332,414 @@ def test_extract_practice_item_count_limits_large_request():
     )
 
     assert result == 10
+
+
+def test_select_practice_type_explicit_scenario_overrides_preference():
+    """
+    Test that an explicit scenario request has priority
+    over the learner's stored preferred format.
+    """
+
+    result = select_practice_type(
+        topic_name="Prompt Engineering",
+        mastery_score=30,
+        preferred_format="concise_explanations",
+        user_message="Give me 2 scenarios about prompt optimization",
+    )
+
+    assert result == "scenario"
+
+
+def test_select_practice_type_explicit_flashcards_overrides_preference():
+    """
+    Test that an explicit flashcard request has priority
+    over the learner's stored preferred format.
+    """
+
+    result = select_practice_type(
+        topic_name="Prompt Engineering",
+        mastery_score=90,
+        preferred_format="detailed_explanations",
+        user_message="Give me 3 flashcards about prompt engineering",
+    )
+
+    assert result == "flashcards"
+
+
+def test_select_practice_type_explicit_coding_overrides_preference():
+    """
+    Test that an explicit coding request has priority
+    over the learner's stored preferred format.
+    """
+
+    result = select_practice_type(
+        topic_name="Python Functions",
+        mastery_score=30,
+        preferred_format="concise_explanations",
+        user_message="Give me coding practice about functions",
+    )
+
+    assert result == "coding"
+
+
+def test_route_topic_scope_allows_generic_current_topic_request(
+    monkeypatch,
+):
+    """
+    Generic practice requests should stay within
+    the learner's current topic.
+    """
+
+    monkeypatch.setattr(
+        "app.agent.graph.classify_topic_scope",
+        lambda user_message, current_topic_name: "no_explicit_topic",
+    )
+
+    state = {
+        "user_message": "Give me 3 flashcards",
+        "current_topic": {
+            "topic_id": 6,
+            "name": (
+                "Agentic AI | Ch1.3 – Prompt engineering "
+                "and LLM prompt optimization"
+            ),
+        },
+    }
+
+    result = route_topic_scope(state)
+
+    assert result == "continue"
+
+
+def test_route_topic_scope_allows_current_topic_subtopic(
+    monkeypatch,
+):
+    """
+    Requests about a subtopic of the current topic
+    should continue through the Tutor workflow.
+    """
+
+    monkeypatch.setattr(
+        "app.agent.graph.classify_topic_scope",
+        lambda user_message, current_topic_name: "in_scope",
+    )
+
+    state = {
+        "user_message": "Explain zero-shot prompting more",
+        "current_topic": {
+            "topic_id": 6,
+            "name": (
+                "Agentic AI | Ch1.3 – Prompt engineering "
+                "and LLM prompt optimization"
+            ),
+        },
+    }
+
+    result = route_topic_scope(state)
+
+    assert result == "continue"
+
+
+def test_route_topic_scope_blocks_different_topic_request(
+    monkeypatch,
+):
+    """
+    Explicit requests about another topic should
+    be blocked by the topic-scope guard.
+    """
+
+    monkeypatch.setattr(
+        "app.agent.graph.classify_topic_scope",
+        lambda user_message, current_topic_name: "out_of_scope",
+    )
+
+    state = {
+        "user_message": "Give me 3 flashcards about RAG",
+        "current_topic": {
+            "topic_id": 6,
+            "name": (
+                "Agentic AI | Ch1.3 – Prompt engineering "
+                "and LLM prompt optimization"
+            ),
+        },
+    }
+
+    result = route_topic_scope(state)
+
+    assert result == "out_of_scope"
+
+
+def test_route_topic_scope_blocks_assessment_on_different_topic(
+    monkeypatch,
+):
+    """
+    Assessment requests about another topic should
+    also be blocked by the topic-scope guard.
+    """
+
+    monkeypatch.setattr(
+        "app.agent.graph.classify_topic_scope",
+        lambda user_message, current_topic_name: "out_of_scope",
+    )
+
+    state = {
+        "user_message": "Quiz me on Python",
+        "current_topic": {
+            "topic_id": 6,
+            "name": (
+                "Agentic AI | Ch1.3 – Prompt engineering "
+                "and LLM prompt optimization"
+            ),
+        },
+    }
+
+    result = route_topic_scope(state)
+
+    assert result == "out_of_scope"
+
+
+def test_out_of_scope_node_returns_guard_message():
+    """
+    The out-of-scope node should tell the learner
+    to stay within the current learning topic.
+    """
+
+    state = {
+        "user_message": "Give me 3 flashcards about RAG",
+        "current_topic": {
+            "topic_id": 6,
+            "name": (
+                "Agentic AI | Ch1.3 – Prompt engineering "
+                "and LLM prompt optimization"
+            ),
+        },
+    }
+
+    result = out_of_scope_node(state)
+
+    assert "response" in result
+
+    assert (
+        "outside your current learning topic"
+        in result["response"]
+    )
+
+    assert (
+        "Prompt engineering"
+        in result["response"]
+    )
+
+    # The guard message is not a learning action,
+    # so it should not overwrite the last Tutor action.
+    assert "last_action" not in result
+
+
+def test_tutor_graph_stops_out_of_scope_request(
+    monkeypatch,
+):
+    """
+    An out-of-scope learner request should stop
+    before any Tutor content action is executed.
+    """
+
+    # Force the scope classifier to reject the request.
+    monkeypatch.setattr(
+        "app.agent.graph.classify_topic_scope",
+        lambda user_message, current_topic_name: "out_of_scope",
+    )
+
+    # Fail the test immediately if practice is reached.
+    def fail_if_practice_runs(state):
+        raise AssertionError(
+            "Practice node should not run "
+            "for an out-of-scope request."
+        )
+
+    monkeypatch.setattr(
+        "app.agent.graph.practice_node",
+        fail_if_practice_runs,
+    )
+
+    from app.agent.graph import build_tutor_graph
+
+    graph = build_tutor_graph()
+
+    result = graph.invoke(
+        {
+            "user_id": 2,
+            "session_id": 409,
+            "user_message": (
+                "Give me 3 flashcards about RAG"
+            ),
+        }
+    )
+
+    assert (
+        "outside your current learning topic"
+        in result["response"]
+    )
+
+def test_tutor_graph_blocks_out_of_scope_request(
+    monkeypatch,
+):
+    """
+    The complete Tutor Agent workflow should stop
+    at the topic-scope guard when the learner asks
+    about a different topic.
+    """
+
+    # Force the topic-scope classifier to reject
+    # the learner's request deterministically.
+    monkeypatch.setattr(
+        "app.agent.graph.classify_topic_scope",
+        lambda user_message, current_topic_name: "out_of_scope",
+    )
+
+    # Practice must never run for an out-of-scope request.
+    def fail_if_practice_runs(state):
+        raise AssertionError(
+            "Practice node should not run "
+            "for an out-of-scope request."
+        )
+
+    monkeypatch.setattr(
+        "app.agent.graph.practice_node",
+        fail_if_practice_runs,
+    )
+
+    with SessionLocal() as db:
+        session = None
+
+        try:
+            # Load the learner's active learning path so
+            # the temporary session belongs to a real path.
+            learning_path = get_active_learning_path(
+                db=db,
+                user_id=2,
+            )
+
+            assert learning_path is not None
+
+            learning_path_id = learning_path[
+                "learning_path_id"
+            ]
+
+            # Select the learner's current available topic.
+            current_topic = select_next_topic(
+                db=db,
+                learning_path_id=learning_path_id,
+            )
+
+            assert current_topic is not None
+
+            # Create a temporary chat session for
+            # the current learning-path topic.
+            session = ChatSession(
+                user_id=2,
+                learning_path_id=learning_path_id,
+                topic_id=current_topic["topic_id"],
+                session_name="Topic Scope Guard Test",
+                started_at=datetime.now(timezone.utc),
+            )
+
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+
+            # Build the complete Tutor Agent workflow.
+            graph = build_tutor_graph()
+
+            result = graph.invoke(
+                {
+                    "user_id": 2,
+                    "session_id": session.chat_session_id,
+                    "user_message": (
+                        "Give me 3 flashcards about RAG"
+                    ),
+                }
+            )
+
+            # The request should stop at the scope guard.
+            assert (
+                "outside your current learning topic"
+                in result["response"]
+            )
+
+            # No learning action should be recorded
+            # because no actual Tutor action was executed.
+            assert result.get("last_action") is None
+
+            # The learner should remain on the same topic.
+            assert (
+                result["current_topic"]["topic_id"]
+                == current_topic["topic_id"]
+            )
+
+        finally:
+            # Remove the temporary chat session
+            # without changing learner progress.
+            if session is not None:
+                db.query(ChatMessage).filter(
+                    ChatMessage.session_id
+                    == session.chat_session_id
+                ).delete()
+
+                db.delete(session)
+                db.commit()
+
+
+def test_plan_next_topic_node_keeps_existing_session_topic():
+    """
+    A topic already attached to the chat session
+    should not be replaced by normal path planning.
+    """
+
+    state = {
+        "user_id": 2,
+        "current_topic": {
+            "topic_id": 6,
+            "name": (
+                "Agentic AI | Ch1.3 – Prompt engineering "
+                "and LLM prompt optimization"
+            ),
+        },
+    }
+
+    result = plan_next_topic_node(state)
+
+    assert result == {}
+
+
+def test_plan_next_topic_node_plans_when_no_session_topic(
+    monkeypatch,
+):
+    """
+    Normal path planning should still run when
+    no topic is already attached to the session.
+    """
+
+    expected_topic = {
+        "topic_id": 6,
+        "name": (
+            "Agentic AI | Ch1.3 – Prompt engineering "
+            "and LLM prompt optimization"
+        ),
+    }
+
+    monkeypatch.setattr(
+        "app.agent.graph.plan_next_topic",
+        lambda state, db: {
+            "current_topic": expected_topic
+        },
+    )
+
+    state = {
+        "user_id": 2,
+        "learning_path": {
+            "learning_path_id": 123,
+        },
+    }
+
+    result = plan_next_topic_node(state)
+
+    assert result["current_topic"] == expected_topic
